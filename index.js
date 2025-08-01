@@ -1,6 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
-import { fileURLToPath } from 'url';
+import {fileURLToPath} from 'url';
 import path from 'path';
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from './routes/userRoutes.js';
@@ -18,5 +18,5 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-    console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  console.log(`Servidor corriendo en http://localhost:${PORT}`);
 });
