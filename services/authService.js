@@ -1,6 +1,7 @@
 import {findUserByCredentials} from "./userService.js";
 import jwt from "jsonwebtoken";
 import tokenStore from "../utils/tokenStore.js";
+import bcrypt from "bcrypt";
 
 export async function loginUser(user, password, context) {
 
@@ -23,21 +24,25 @@ export async function loginUser(user, password, context) {
   const roles = roleMap[context];
 
   try {
-    const response = await findUserByCredentials(user, password, roles);
+    const foundUser = await findUserByCredentials(user, user, roles);
 
-    if (response.error) {
-      return {error: response.error};
+    if (foundUser.error) {
+      return {error: foundUser.error};
     }
 
-    const accessToken = jwt.sign(response, process.env.JWT_SECRET, {
+    const valid = await bcrypt.compare(password, foundUser.password);
+
+    if (!valid) return {error: 'Contraseña incorrecta'};
+
+    const accessToken = jwt.sign(foundUser, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
 
-    const refreshToken = jwt.sign(response, process.env.JWT_REFRESH_SECRET, {
+    const refreshToken = jwt.sign(foundUser, process.env.JWT_REFRESH_SECRET, {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY
     });
 
-    tokenStore.setRefresh(response.codUser, refreshToken);
+    tokenStore.setRefresh(foundUser.codUser, refreshToken);
 
     return {accessToken, refreshToken};
   } catch (error) {

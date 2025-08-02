@@ -5,6 +5,12 @@ import bcrypt from "bcrypt";
 import {loginUser} from "../services/authService.js";
 import pool from "../config/db.js";
 import fs from "fs";
+import {
+  assignRoleToUser,
+  findExistingPerson,
+  findExistingUser,
+  findUserByUsernameOrEmailAndContext, getRoleIdByCode, insertDocument, insertPerson, insertUser
+} from "../services/userService.js";
 
 dotenv.config();
 
@@ -78,42 +84,54 @@ export const register = async (req, res) => {
     passport_entry_date
   } = req.body;
 
-  if (!username || !email || !password || !document_number || !first_name)
+  let personId = null;
+  let userId = null;
+
+  if (!username || !email || !password || !document_number || !first_name) {
+    cleanUploadedFiles(req);
     return res.status(400).json({error: 'Todos los campos son obligatorios.'});
+  }
 
   const client = await pool.connect();
 
   try {
     await client.query('BEGIN');
 
-    const existingUser = await client.query(
-      `SELECT id
-       FROM users
-       WHERE username = $1
-          or email = $2`,
-      [username, email]
+    const parseRoles = (rolesStr = '') =>
+      rolesStr.split(',').map(role => role.trim()).filter(Boolean);
+
+    const contextRoles = {
+      APP: parseRoles(process.env.APP_ROLES),
+      WEB: parseRoles(process.env.WEB_ROLES)
+    };
+
+    const conflictingUsers = await findUserByUsernameOrEmailAndContext(
+      client,
+      username,
+      email,
+      contextRoles[context]
     );
 
-    if (existingUser.rows.length > 0) {
-      return res.status(409).json({error: 'El usuario ingresado ya existe.'});
+    if (conflictingUsers.length > 0) {
+      cleanUploadedFiles(req);
+      return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
     }
 
-    const personInsert = await client.query(
-      `INSERT INTO persons
-       (document_type_id, document_number, first_name, last_name, phone_number, nationality, birth_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [
-        document_type_id || 1,
+    const existingPerson = await findExistingPerson(document_number, document_type_id);
+
+    if (!existingPerson.codPerson) {
+      personId = await insertPerson(client, {
+        document_type_id: document_type_id || 1,
         document_number,
         first_name,
         last_name,
         phone_number,
-        nationality || 'PY',
+        nationality: nationality || 'PY',
         birth_date
-      ]
-    );
-
-    const personId = personInsert.rows[0].id;
+      });
+    } else {
+      personId = existingPerson.codPerson;
+    }
 
     const files = req.files;
     const docPairs = [
@@ -133,100 +151,66 @@ export const register = async (req, res) => {
 
     for (const doc of docPairs) {
       if (doc.front && doc.back) {
-        await client.query(
-          `INSERT INTO documents (person_id, type, front_file_path, back_file_path, expiration_date)
-           VALUES ($1, $2, $3, $4, $5)`,
-          [personId, doc.type, doc.front.path, doc.back.path, doc.expiration || null]
-        );
+        await insertDocument(client, {
+          person_id: personId,
+          type: doc.type,
+          front_file_path: doc.front.path,
+          back_file_path: doc.back.path,
+          expiration_date: doc.expiration
+        });
       }
     }
 
-    // Agregar sello de entrada si es extranjero con pasaporte
-    // if (nationality !== 'PY' && document_type_id === 2 && passport_entry_date) {
-    //     const entryFront = files['passport_entry_front']?.[0];
-    //     const entryBack = files['passport_entry_back']?.[0];
-    //
-    //     if (entryFront && entryBack) {
-    //         await client.query(
-    //             `INSERT INTO documents (person_id, type, front_file_path, back_file_path, expiration_date, entry_date)
-    //              VALUES ($1, 'passport_stamp', $2, $3, null, $4)`,
-    //             [personId, entryFront.path, entryBack.path, passport_entry_date]
-    //         );
-    //     }
-    // }
+    const existingUser = await findExistingUser(username, email);
 
-    const hashedPassword = await bcrypt.hash(password, 12);
+    if (!existingUser.codUser) {
+      const hashedPassword = await bcrypt.hash(password, 12);
 
-    const userInsert = await client.query(
-      `INSERT INTO users
-           (person_id, username, email, password, is_active, is_email_validated)
-       VALUES ($1, $2, $3, $4, true, false) RETURNING id`,
-      [personId, username, email, hashedPassword]
-    );
-
-    const userId = userInsert.rows[0].id;
-
-    const parseRoles = (rolesStr = '') => {
-      return rolesStr
-        .split(',')
-        .map(role => role.trim())
-        .filter(role => role.length > 0);
-    };
-
-    const contextRoles = {
-      APP: parseRoles(process.env.APP_ROLES),
-      WEB: parseRoles(process.env.WEB_ROLES)
-    };
-
-    const conflictingUser = await client.query(
-      `SELECT u.id, r.code as role
-       FROM users u
-                JOIN user_roles ur ON u.id = ur.user_id
-                JOIN roles r ON r.id = ur.role_id
-       WHERE (u.username = $1 OR u.email = $2)
-         AND r.code = ANY ($3)`,
-      [username, email, contextRoles[context]]
-    );
-
-    if (conflictingUser.rows.length > 0) {
-      return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
+      userId = await insertUser(client, {
+        personId,
+        username,
+        email,
+        hashedPassword
+      });
+    } else {
+      userId = existingUser.codUser;
     }
 
-    const roleCode = contextRoles[context][0];
-    const rolesResult = await client.query(`SELECT id
-                                            FROM roles
-                                            WHERE code = $1`, [roleCode]);
+    const roleId = await getRoleIdByCode(client, contextRoles[context][0]);
 
-    await client.query(
-      `INSERT INTO user_roles (user_id, role_id)
-       VALUES ($1, $2)`,
-      [userId, rolesResult.rows[0].id]
-    );
+    await assignRoleToUser(client, userId, roleId);
 
     await client.query('COMMIT');
 
     const result = await loginUser(username, password, context);
 
-    if (result.error)
+    if (result.error) {
+      cleanUploadedFiles(req);
       return res.status(401).json({error: result.error});
-
+    }
     return res.status(201).json({message: 'Usuario registrado correctamente.', data: result});
 
   } catch (err) {
     await client.query('ROLLBACK');
     console.error('❌ Error en el registro:', err.message);
-    // Eliminar archivos subidos si existieran
-    if (req.files) {
-      Object.values(req.files).flat().forEach(file => {
-        try {
-          fs.unlinkSync(file.path);
-        } catch (e) {
-          console.warn('No se pudo eliminar archivo:', file.path);
-        }
-      });
-    }
+
+    cleanUploadedFiles(req);
+
     return res.status(500).json({error: 'Error interno del servidor.'});
+
   } finally {
     client.release();
   }
 };
+
+function cleanUploadedFiles(req) {
+  if (req.files) {
+    Object.values(req.files).flat().forEach(file => {
+      try {
+        fs.unlinkSync(file.path);
+      } catch (e) {
+        console.warn('No se pudo eliminar archivo:', file.path);
+      }
+    });
+  }
+}

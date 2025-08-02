@@ -4,6 +4,7 @@ import {fileURLToPath} from 'url';
 import path from 'path';
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from './routes/userRoutes.js';
+import logger from "./utils/logger.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -18,5 +19,5 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`Servidor corriendo en http://localhost:${PORT}`);
+  logger.info(`Servidor corriendo en http://localhost:${PORT}`);
 });
