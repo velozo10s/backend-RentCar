@@ -43,7 +43,8 @@ export const findPersonByCodUser = async (codUser) => {
         select dt.code                            document_type,
                p.document_number,
                p.first_name || ' ' || p.last_name full_name,
-               p.phone_number
+               p.phone_number,
+               u.is_active
         from persons p
                  left join users u on p.id = u.person_id
                  left join document_types dt on p.document_type_id = dt.id
@@ -73,7 +74,11 @@ export const findPersonByCodUser = async (codUser) => {
 export const findDocumentsByUserId = async (codUser) => {
   try {
     const query = `
-        SELECT d.type, d.front_file_path, d.back_file_path, d.expiration_date, d.entry_date
+        SELECT d.type,
+               d.front_file_path,
+               d.back_file_path,
+               to_char(d.expiration_date, 'yyyy-mm-dd') as "expiration_date",
+               d.entry_date
         FROM documents d
                  JOIN persons p ON p.id = d.person_id
                  JOIN users u ON u.person_id = p.id
