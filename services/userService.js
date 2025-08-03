@@ -133,7 +133,7 @@ export const findExistingPerson = async (document_number, document_type_id) => {
          AND p.document_type_id = $2`,
       [document_number, document_type_id]
     );
-    logger.info(`📄 Persona ${result.rows[0].id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
+    logger.info(`📄 Persona ${result?.rows[0]?.id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
     return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
   } catch (error) {
     logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});

@@ -123,7 +123,7 @@ export const register = async (req, res) => {
       contextRoles[context]
     );
 
-    if (conflictingUsers.id) {
+    if (conflictingUsers?.id) {
       cleanUploadedFiles(req);
       return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
     }
