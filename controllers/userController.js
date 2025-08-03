@@ -1,4 +1,4 @@
-import {findPersonByCodUser} from "../services/userService.js";
+import {findDocumentsByUserId, findPersonByCodUser} from "../services/userService.js";
 import logger from "../utils/logger.js";
 
 export const getUser = async (req, res) => {
@@ -6,14 +6,16 @@ export const getUser = async (req, res) => {
   const {codUser} = req.params;
 
   try {
-    const response = await findPersonByCodUser(codUser);
+    const person = await findPersonByCodUser(codUser);
 
-    if (response.error) {
-      logger.error(`Error: ${response.error}.`, {label: 'Controller'});
-      return res.status(400).json({error: response.error});
+    const documents = await findDocumentsByUserId(codUser);
+
+    if (person.error) {
+      logger.error(`Error: ${person.error}.`, {label: 'Controller'});
+      return res.status(400).json({error: person.error});
     }
 
-    res.json(response);
+    res.json({...person, documents});
   } catch (error) {
     console.error('User error: ', error);
     res.status(500).json({error: 'Error interno del servidor.'});

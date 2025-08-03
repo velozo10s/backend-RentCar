@@ -6,7 +6,7 @@ import {loginUser} from "../services/authService.js";
 import pool from "../config/db.js";
 import fs from "fs";
 import {
-  assignRoleToUser,
+  assignRoleToUser, findDocumentTypeByCode,
   findExistingPerson,
   findExistingUser,
   findUserByUsernameOrEmailAndContext, getRoleIdByCode, insertDocument, insertPerson, insertUser
@@ -55,7 +55,7 @@ export const refresh = (req, res) => {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
 
-    res.json({accessToken: newAccessToken});
+    res.json({access: newAccessToken});
   });
 };
 
@@ -79,7 +79,7 @@ export const logout = (req, res) => {
 
 export const register = async (req, res) => {
   const {
-    document_type_id,
+    document_type_code,
     document_number,
     first_name,
     last_name,
@@ -123,16 +123,19 @@ export const register = async (req, res) => {
       contextRoles[context]
     );
 
-    if (conflictingUsers.length > 0) {
+    if (conflictingUsers.id) {
       cleanUploadedFiles(req);
       return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
     }
 
-    const existingPerson = await findExistingPerson(document_number, document_type_id);
+    const document_type = await findDocumentTypeByCode(document_type_code);
 
-    if (!existingPerson.codPerson) {
+    const existingPerson = await findExistingPerson(document_number, document_type.id);
+
+    if (!existingPerson.id) {
+
       personId = await insertPerson(client, {
-        document_type_id: document_type_id || 1,
+        document_type_id: document_type.id || 1,
         document_number,
         first_name,
         last_name,
@@ -141,7 +144,7 @@ export const register = async (req, res) => {
         birth_date
       });
     } else {
-      personId = existingPerson.codPerson;
+      personId = existingPerson.id;
     }
 
     const files = req.files;

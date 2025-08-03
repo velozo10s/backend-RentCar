@@ -1,8 +1,9 @@
-import {findUserByCredentials} from "./userService.js";
+import {findPersonByCodUser, findUserByUsernameOrEmailAndContext} from "./userService.js";
 import jwt from "jsonwebtoken";
 import tokenStore from "../utils/tokenStore.js";
 import bcrypt from "bcrypt";
 import logger from "../utils/logger.js";
+import pool from "../config/db.js";
 
 export async function loginUser(user, password, context) {
   logger.info(`Ingresa al loginUser.`, {label: 'Service'});
@@ -24,33 +25,43 @@ export async function loginUser(user, password, context) {
 
   const roles = roleMap[context];
 
-  try {
-    logger.info(`Obteniendo datos del usuario: ${user}`, {label: 'Service'});
-    const foundUser = await findUserByCredentials(user, user, roles);
+  const client = await pool.connect();
 
-    if (foundUser.error) {
-      return {error: foundUser.error};
+  try {
+
+    logger.info(`Obteniendo datos del usuario: ${user}`, {label: 'Service'});
+    const userData = await findUserByUsernameOrEmailAndContext(client, user, user, roles);
+
+    if (userData.error) {
+      return {error: userData.error};
     }
 
+    const {userPassword, ...data} = userData;
+
     logger.info(`Verificando si la contraseña coincide.`, {label: 'Service'});
-    const valid = await bcrypt.compare(password, foundUser.password);
+
+    const valid = await bcrypt.compare(password, userPassword);
 
     if (!valid) return {error: 'Contraseña incorrecta'};
 
+    const personData = await findPersonByCodUser(userData.id);
+
     logger.info(`Generando token de acceso.`, {label: 'Service'});
-    const accessToken = jwt.sign(foundUser, process.env.JWT_SECRET, {
+    const accessToken = jwt.sign(data, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
 
-    const refreshToken = jwt.sign(foundUser, process.env.JWT_REFRESH_SECRET, {
+    const refreshToken = jwt.sign(data, process.env.JWT_REFRESH_SECRET, {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY
     });
 
-    tokenStore.setRefresh(foundUser.codUser, refreshToken);
+    tokenStore.setRefresh(data.id, refreshToken);
 
-    return {accessToken, refreshToken};
+    return {access: accessToken, refresh: refreshToken, user: {...data, ...personData}};
   } catch (error) {
     logger.error(`Error al iniciar sesion. ${error}`, {label: 'Service'});
     return {error: 'Error interno del servidor.'};
+  } finally {
+    client.release();
   }
 }

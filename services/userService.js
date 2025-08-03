@@ -2,52 +2,14 @@ import pool from '../config/db.js';
 import fs from 'fs';
 import logger from "../utils/logger.js";
 
-export const findUserByCredentials = async (user, email, roles) => {
-  logger.info(`Ingresa a findUserByCredentials.`, {label: 'Service'});
-  try {
-    const query = `
-        SELECT u.id       codUser,
-               u.username userName,
-               u.email,
-               u.is_email_validated,
-               u.password,
-               r.code     role
-        FROM users u
-                 LEFT JOIN user_roles ur ON u.id = ur.user_id
-                 LEFT JOIN roles r ON r.id = ur.role_id
-        WHERE u.is_active = true
-          AND (u.username = $1 OR u.email = $2)
-          AND r.code = ANY ($3::text[])
-    `;
-
-    const values = [user, email, roles];
-    const userResult = await pool.query(query, values);
-
-    if (userResult.rows.length > 0) {
-
-      const foundUser = userResult.rows[0];
-
-      logger.info(`Se ha encontrado un usuario para las credenciales proveidas.`, {label: 'Service'});
-
-      return {codUser: foundUser.id, userName: foundUser.username, password: foundUser.password, role: foundUser.role};
-    } else {
-      logger.info(`No existe el usuario para las credenciales proveidas.`, {label: 'Service'});
-      return {error: 'No existe el usuario para las credenciales proveidas.', details: {user: user}};
-    }
-
-  } catch (error) {
-    logger.error(`Error en el findUserByCredentials: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error intentando obtener los datos del usuario, reintente.'};
-  }
-}
-
 export const findPersonByCodUser = async (codUser) => {
-  logger.info(`Obteniendo datos del usuario con id: ${codUser}.`, {label: 'Service'});
+  logger.info(`🔍 Buscando datos del usuario con id: ${codUser}.`, {label: 'Service'});
   try {
     const query = `
         select dt.code                            document_type,
                p.document_number,
-               p.first_name || ' ' || p.last_name full_name,
+               p.first_name || ' ' || p.last_name name,
+               p.birth_date,
                p.phone_number,
                u.is_active
         from persons p
@@ -61,25 +23,23 @@ export const findPersonByCodUser = async (codUser) => {
 
     if (userResult.rows.length > 0) {
 
-      const foundData = userResult.rows[0];
+      const person = userResult.rows[0];
 
-      logger.info(`Datos del usuario con id ${codUser}: ${JSON.stringify(foundData)}`, {label: 'Service'});
+      logger.info(`✅ Datos del usuario con id ${codUser}: ${JSON.stringify(person)}`, {label: 'Service'});
 
-      const documents = await findDocumentsByUserId(codUser);
-
-      return {...foundData, codUser, documents};
+      return person;
     } else {
-      logger.info(`No se ha encontrado una persona asociada al codUser: ${codUser}.`, {label: 'Service'});
+      logger.info(`⚠️ No se ha encontrado una persona asociada al codUser: ${codUser}.`, {label: 'Service'});
       return {error: 'No existe el usuario con el id enviado.', details: {codUser: codUser}};
     }
   } catch (error) {
-    logger.error(`Error en el findPersonByCodUser: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en el findPersonByCodUser: ${error.message}`, {label: 'Service'});
     return {error: 'Ha ocurrido un error, reintente.'};
   }
 }
 
 export const findDocumentsByUserId = async (codUser) => {
-  logger.info(`Obteniendo documentos del usuario con id: ${codUser}.`, {label: 'Service'});
+  logger.info(`🔍 Buscando documentos del usuario con id: ${codUser}.`, {label: 'Service'});
   try {
     const query = `
         SELECT d.type,
@@ -97,15 +57,15 @@ export const findDocumentsByUserId = async (codUser) => {
     const documentResult = await pool.query(query, values);
 
     if (documentResult.rows.length > 0) {
-      logger.info(`Documentos asociados al usuario: ${codUser}: ${JSON.stringify(documentResult.rows)}`, {label: 'Service'});
+      logger.info(`✅ Documentos asociados al usuario: ${codUser}: ${JSON.stringify(documentResult.rows)}`, {label: 'Service'});
 
       return documentResult.rows;
     } else {
-      logger.info(`No se han encontrado documentos asociados al usuario: ${codUser}.`, {label: 'Service'});
+      logger.info(`⚠️ No se han encontrado documentos asociados al usuario: ${codUser}.`, {label: 'Service'});
       return {error: 'No se encontraron documentos para el id enviado.', details: {codUser: codUser}};
     }
   } catch (error) {
-    logger.error(`Error en el findDocumentsByUserId: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en el findDocumentsByUserId: ${error.message}`, {label: 'Service'});
     return {error: 'Ha ocurrido un error, reintente.'};
   }
 }
@@ -140,40 +100,62 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
   logger.info(`🔍 Buscando usuario por username/email en contexto de roles`, {label: 'Service'});
   try {
     const result = await client.query(
-      `SELECT u.id, r.code as role
+      `SELECT u.id,
+              u.username as "username",
+              u.email,
+              u.is_email_validated,
+              u.password as "userPassword",
+              r.code        role
        FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
                 JOIN roles r ON r.id = ur.role_id
        WHERE u.is_active = true
          AND (u.username = $1 OR u.email = $2)
-         AND r.code = ANY ($3)`,
+         AND r.code = ANY ($3::text[])`,
       [username, email, roleCodes]
     );
     logger.info(`✅ Resultado: ${result.rows.length} usuario(s) encontrados`, {label: 'Service'});
-    return result.rows;
+    return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
   } catch (error) {
     logger.error(`❌ Error en findUserByUsernameOrEmailAndContext: ${error.message}`, {label: 'Service'});
-    return [];
+    return {error: 'Ha ocurrido un error, reintente.'};
   }
 };
 
 
-export const findExistingPerson = async (documentNumber, documentTypeId) => {
-  logger.info(`🔍 Buscando persona con doc ${documentNumber} y tipo ${documentTypeId}`, {label: 'Service'});
+export const findExistingPerson = async (document_number, document_type_id) => {
+  logger.info(`🔍 Buscando persona con doc ${document_number}`, {label: 'Service'});
   try {
     const result = await pool.query(
-      `SELECT id as "codPerson"
-       FROM persons
-       WHERE document_number = $1
-         AND document_type_id = $2`,
-      [documentNumber, documentTypeId]
+      `SELECT id
+       FROM persons p
+       WHERE p.document_number = $1
+         AND p.document_type_id = $2`,
+      [document_number, document_type_id]
+    );
+    logger.info(`📄 Persona ${result.rows[0].id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
+    return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
+  } catch (error) {
+    logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});
+    return {error: 'Ha ocurrido un error, reintente.'};
+  }
+};
+
+export const findDocumentTypeByCode = async (code) => {
+  logger.info(`🔍 Buscando id del tipo de documento ${code}.`, {label: 'Service'});
+  try {
+    const result = await pool.query(
+      `SELECT id
+       FROM document_types dt
+       WHERE dt.code = $1`,
+      [code]
     );
     const found = result.rows[0] || {};
-    logger.info(`📄 Persona ${found.codPerson ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
+    logger.info(`📄 Tipo de documento ${found.id ? 'encontrado' : 'no encontrado'}`, {label: 'Service'});
     return found;
   } catch (error) {
     logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});
-    return {};
+    return {error: 'Ha ocurrido un error, reintente.'};
   }
 };
 
@@ -290,7 +272,7 @@ export const findExistingUser = async (username, email) => {
     return found;
   } catch (error) {
     logger.error(`❌ Error en findExistingUser: ${error.message}`, {label: 'Service'});
-    return {};
+    return {error: 'Ha ocurrido un error, reintente.'};
   }
 };
 

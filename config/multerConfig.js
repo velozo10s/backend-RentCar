@@ -14,11 +14,11 @@ const storage = multer.diskStorage({
     cb(null, uploadDir);
   },
   filename: async (req, file, cb) => {
-    const {document_type_id, document_number} = req.body;
-    const response = await findDocumentTypeById(document_type_id);
+    const {document_type_code, document_number} = req.body;
+    //const response = await findDocumentTypeById(document_type_code);
     const timestamp = Date.now();
     const ext = path.extname(file.originalname);
-    cb(null, `${document_number}-${response.code}-${file.fieldname}-${timestamp}${ext}`);
+    cb(null, `${document_number}-${document_type_code}-${file.fieldname}-${timestamp}${ext}`);
   }
 });
 
