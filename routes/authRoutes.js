@@ -7,7 +7,6 @@ const authRoutes = express.Router();
 authRoutes.post('/login', login);
 authRoutes.post('/refresh', refresh);
 authRoutes.post('/logout', logout);
-//authRoutes.post('/register', register);
 authRoutes.post(
   '/register',
   upload.fields([

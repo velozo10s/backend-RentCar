@@ -2,9 +2,10 @@ import {findUserByCredentials} from "./userService.js";
 import jwt from "jsonwebtoken";
 import tokenStore from "../utils/tokenStore.js";
 import bcrypt from "bcrypt";
+import logger from "../utils/logger.js";
 
 export async function loginUser(user, password, context) {
-
+  logger.info(`Ingresa al loginUser.`, {label: 'Service'});
   if (!user || !password || !context) {
     return {error: 'Credenciales no ingresadas.'};
   }
@@ -24,16 +25,19 @@ export async function loginUser(user, password, context) {
   const roles = roleMap[context];
 
   try {
+    logger.info(`Obteniendo datos del usuario: ${user}`, {label: 'Service'});
     const foundUser = await findUserByCredentials(user, user, roles);
 
     if (foundUser.error) {
       return {error: foundUser.error};
     }
 
+    logger.info(`Verificando si la contraseña coincide.`, {label: 'Service'});
     const valid = await bcrypt.compare(password, foundUser.password);
 
     if (!valid) return {error: 'Contraseña incorrecta'};
 
+    logger.info(`Generando token de acceso.`, {label: 'Service'});
     const accessToken = jwt.sign(foundUser, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
@@ -46,7 +50,7 @@ export async function loginUser(user, password, context) {
 
     return {accessToken, refreshToken};
   } catch (error) {
-    console.error('Login error: ', error);
+    logger.error(`Error al iniciar sesion. ${error}`, {label: 'Service'});
     return {error: 'Error interno del servidor.'};
   }
 }

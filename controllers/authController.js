@@ -11,21 +11,28 @@ import {
   findExistingUser,
   findUserByUsernameOrEmailAndContext, getRoleIdByCode, insertDocument, insertPerson, insertUser
 } from "../services/userService.js";
+import logger from "../utils/logger.js";
 
 dotenv.config();
 
 export const login = async (req, res) => {
+  logger.info(`Ingresa a login.`, {label: 'Controller'});
   const {user, password, context} = req.body;
 
   const result = await loginUser(user, password, context);
 
-  if (result.error)
+  if (result.error) {
+    logger.error(`Error: ${result.error}`, {label: 'Controller'});
     return res.status(401).json({error: result.error});
+  }
 
+  logger.info(`Finaliza login.`, {label: 'Controller'});
   return res.status(200).json(result);
 };
 
 export const refresh = (req, res) => {
+  logger.info(`Ingresa a refresh.`, {label: 'Controller'});
+
   const {refreshToken} = req.body;
 
   if (!refreshToken) return res.status(401).json({error: 'Token requerido'});
@@ -34,6 +41,7 @@ export const refresh = (req, res) => {
 
   const storedToken = tokenStore.getRefresh(data.codUser);
 
+  logger.info(`Verifica validez del token.`, {label: 'Controller'});
   if (storedToken !== refreshToken) {
     return res.status(403).json({error: 'Refresh token inválido o vencido'});
   }
@@ -42,6 +50,7 @@ export const refresh = (req, res) => {
     if (err) return res.status(403).json({error: 'Token inválido'});
 
     const {codUser, role} = user;
+    logger.info(`Genera un nuevo token.`, {label: 'Controller'});
     const newAccessToken = jwt.sign({codUser, role}, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
@@ -51,6 +60,7 @@ export const refresh = (req, res) => {
 };
 
 export const logout = (req, res) => {
+  logger.info(`Ingresa a logout.`, {label: 'Controller'});
   const authHeader = req.headers['authorization'];
   const accessToken = authHeader && authHeader.split(' ')[1];
   const {refreshToken} = req.body;
@@ -58,11 +68,12 @@ export const logout = (req, res) => {
   if (accessToken) {
     tokenStore.blacklistAccess(accessToken);
   }
-
+  logger.info(`Valida el token recibido.`, {label: 'Controller'});
   const data = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
   tokenStore.removeRefresh(data.codUser);
 
+  logger.info(`Sesión cerrada con éxito.`, {label: 'Controller'});
   res.json({message: 'Sesión cerrada con éxito'});
 };
 
