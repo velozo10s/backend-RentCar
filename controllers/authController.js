@@ -205,7 +205,7 @@ export const register = async (req, res) => {
       cleanUploadedFiles(req);
       return res.status(401).json({error: result.error});
     }
-    return res.status(201).json({message: 'Usuario registrado correctamente.', data: result});
+    return res.status(201).json(result);
 
   } catch (err) {
     await client.query('ROLLBACK');

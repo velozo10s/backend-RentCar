@@ -115,7 +115,7 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
       [username, email, roleCodes]
     );
     logger.info(`✅ Resultado: ${result.rows.length} usuario(s) encontrados`, {label: 'Service'});
-    return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
+    return result.rows.length > 0 ? result.rows[0] : {error: 'No se ha encontrado el usuario.'};
   } catch (error) {
     logger.error(`❌ Error en findUserByUsernameOrEmailAndContext: ${error.message}`, {label: 'Service'});
     return {error: 'Ha ocurrido un error, reintente.'};
@@ -134,7 +134,7 @@ export const findExistingPerson = async (documentNumber, documentTypeId) => {
       [documentNumber, documentTypeId]
     );
     logger.info(`📄 Persona ${result?.rows[0]?.id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
-    return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
+    return result.rows.length > 0 ? result.rows[0] : {error: 'No se ha encontrado el usuario.'};
   } catch (error) {
     logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});
     return {error: 'Ha ocurrido un error, reintente.'};
