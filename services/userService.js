@@ -176,7 +176,8 @@ export const insertPerson = async (client, personData) => {
     const result = await client.query(
       `INSERT INTO persons (document_type_id, document_number, first_name, last_name, phone_number, nationality,
                             birth_date)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING id`,
       [documentTypeId, documentNumber, firstName, lastName, phoneNumber, nationalityCode, birthDate]
     );
 
@@ -230,14 +231,13 @@ export const insertDocument = async (client, document) => {
       `INSERT INTO documents (person_id, type, front_file_path, back_file_path,
                               expiration_date, entry_date, observations,
                               uploaded_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL) ON CONFLICT (person_id, type) DO
-      UPDATE SET
-          front_file_path = EXCLUDED.front_file_path,
-          back_file_path = EXCLUDED.back_file_path,
-          expiration_date = EXCLUDED.expiration_date,
-          entry_date = EXCLUDED.entry_date,
-          observations = EXCLUDED.observations,
-          updated_at = NOW()`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL)
+       ON CONFLICT (person_id, type) DO UPDATE SET front_file_path = EXCLUDED.front_file_path,
+                                                   back_file_path  = EXCLUDED.back_file_path,
+                                                   expiration_date = EXCLUDED.expiration_date,
+                                                   entry_date      = EXCLUDED.entry_date,
+                                                   observations    = EXCLUDED.observations,
+                                                   updated_at      = NOW()`,
       [
         person_id,
         type,
@@ -284,7 +284,8 @@ export const insertUser = async (client, userData) => {
   try {
     const result = await client.query(
       `INSERT INTO users (person_id, username, email, password)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
+       VALUES ($1, $2, $3, $4)
+       RETURNING id`,
       [personId, username, email, hashedPassword]
     );
 

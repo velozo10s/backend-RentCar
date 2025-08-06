@@ -94,10 +94,12 @@ export const register = async (req, res) => {
     expiration_license,
     //passport_entry_date
   } = req.body;
+  logger.info(`Ingresa a register.`, {label: 'Controller'});
 
   let personId = null;
   let userId = null;
 
+  logger.info(`Verifica campos obligatorios.`, {label: 'Controller'});
   if (!username || !email || !password || !documentNumber || !firstName) {
     cleanUploadedFiles(req);
     return res.status(400).json({error: 'Todos los campos son obligatorios.'});
@@ -148,33 +150,34 @@ export const register = async (req, res) => {
     }
 
     const files = req.files;
-    const docPairs = [
-      {
-        type: 'document',
-        front: files['document_front']?.[0],
-        back: files['document_back']?.[0],
-        expiration: expiration_document
-      },
-      {
-        type: 'license',
-        front: files['license_front']?.[0],
-        back: files['license_back']?.[0],
-        expiration: expiration_license
-      }
-    ];
+    if (files) {
+      const docPairs = [
+        {
+          type: 'document',
+          front: files['document_front']?.[0],
+          back: files['document_back']?.[0],
+          expiration: expiration_document
+        },
+        {
+          type: 'license',
+          front: files['license_front']?.[0],
+          back: files['license_back']?.[0],
+          expiration: expiration_license
+        }
+      ];
 
-    for (const doc of docPairs) {
-      if (doc.front && doc.back) {
-        await insertDocument(client, {
-          person_id: personId,
-          type: doc.type,
-          front_file_path: doc.front.path,
-          back_file_path: doc.back.path,
-          expiration_date: doc.expiration
-        });
+      for (const doc of docPairs) {
+        if (doc.front && doc.back) {
+          await insertDocument(client, {
+            person_id: personId,
+            type: doc.type,
+            front_file_path: doc.front.path,
+            back_file_path: doc.back.path,
+            expiration_date: doc.expiration
+          });
+        }
       }
     }
-
     const existingUser = await findExistingUser(username, email);
 
     if (!existingUser.id) {
@@ -218,6 +221,7 @@ export const register = async (req, res) => {
 };
 
 function cleanUploadedFiles(req) {
+  logger.info(`Elimina los archivos del servidor.`, {label: 'Controller'});
   if (req.files) {
     Object.values(req.files).flat().forEach(file => {
       try {
