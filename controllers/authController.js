@@ -39,7 +39,7 @@ export const refresh = (req, res) => {
 
   const data = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
-  const storedToken = tokenStore.getRefresh(data.codUser);
+  const storedToken = tokenStore.getRefresh(data.id);
 
   logger.info(`Verifica validez del token.`, {label: 'Controller'});
   if (storedToken !== refreshToken) {
@@ -49,9 +49,9 @@ export const refresh = (req, res) => {
   jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, (err, user) => {
     if (err) return res.status(403).json({error: 'Token inválido'});
 
-    const {codUser, role} = user;
+    const {id, role} = user;
     logger.info(`Genera un nuevo token.`, {label: 'Controller'});
-    const newAccessToken = jwt.sign({codUser, role}, process.env.JWT_SECRET, {
+    const newAccessToken = jwt.sign({id, role}, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
 
@@ -79,26 +79,26 @@ export const logout = (req, res) => {
 
 export const register = async (req, res) => {
   const {
-    document_type_code,
-    document_number,
-    first_name,
-    last_name,
-    phone_number,
-    nationality,
-    birth_date,
+    documentType,
+    documentNumber,
+    firstName,
+    lastName,
+    phoneNumber,
+    nationalityCode,
+    birthDate,
     username,
     email,
     password,
     context,
     expiration_document,
     expiration_license,
-    passport_entry_date
+    //passport_entry_date
   } = req.body;
 
   let personId = null;
   let userId = null;
 
-  if (!username || !email || !password || !document_number || !first_name) {
+  if (!username || !email || !password || !documentNumber || !firstName) {
     cleanUploadedFiles(req);
     return res.status(400).json({error: 'Todos los campos son obligatorios.'});
   }
@@ -128,20 +128,20 @@ export const register = async (req, res) => {
       return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
     }
 
-    const document_type = await findDocumentTypeByCode(document_type_code);
+    const documentTypeData = await findDocumentTypeByCode(documentType);
 
-    const existingPerson = await findExistingPerson(document_number, document_type.id);
+    const existingPerson = await findExistingPerson(documentNumber, documentTypeData.id);
 
     if (!existingPerson.id) {
 
       personId = await insertPerson(client, {
-        document_type_id: document_type.id || 1,
-        document_number,
-        first_name,
-        last_name,
-        phone_number,
-        nationality: nationality || 'PY',
-        birth_date
+        documentTypeId: documentTypeData.id || 1,
+        documentNumber,
+        firstName,
+        lastName,
+        phoneNumber,
+        nationalityCode: nationalityCode || 'PY',
+        birthDate
       });
     } else {
       personId = existingPerson.id;
@@ -177,7 +177,7 @@ export const register = async (req, res) => {
 
     const existingUser = await findExistingUser(username, email);
 
-    if (!existingUser.codUser) {
+    if (!existingUser.id) {
       const hashedPassword = await bcrypt.hash(password, 12);
 
       userId = await insertUser(client, {

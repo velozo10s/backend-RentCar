@@ -6,12 +6,12 @@ export const findPersonByCodUser = async (codUser) => {
   logger.info(`🔍 Buscando datos del usuario con id: ${codUser}.`, {label: 'Service'});
   try {
     const query = `
-        select dt.code                            document_type,
-               p.document_number,
+        select dt.code           as               "documentType",
+               p.document_number as               "documentNumber",
                p.first_name || ' ' || p.last_name name,
-               p.birth_date,
-               p.phone_number,
-               u.is_active
+               p.birth_date      as               "birthDate",
+               p.phone_number    as               "phoneNumber",
+               u.is_active       as               "isActive"
         from persons p
                  left join users u on p.id = u.person_id
                  left join document_types dt on p.document_type_id = dt.id
@@ -43,10 +43,10 @@ export const findDocumentsByUserId = async (codUser) => {
   try {
     const query = `
         SELECT d.type,
-               d.front_file_path,
-               d.back_file_path,
-               to_char(d.expiration_date, 'yyyy-mm-dd') as "expiration_date",
-               d.entry_date
+               d.front_file_path as "frontFilePath",
+               d.back_file_path  as "backFilePath",
+               d.expiration_date as "expirationDate",
+               d.entry_date      as "entryDate"
         FROM documents d
                  JOIN persons p ON p.id = d.person_id
                  JOIN users u ON u.person_id = p.id
@@ -101,11 +101,11 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
   try {
     const result = await client.query(
       `SELECT u.id,
-              u.username as "username",
+              u.username           as "username",
               u.email,
-              u.is_email_validated,
-              u.password as "userPassword",
-              r.code        role
+              u.is_email_validated as "isEmailValidated",
+              u.password           as "userPassword",
+              r.code                  role
        FROM users u
                 JOIN user_roles ur ON u.id = ur.user_id
                 JOIN roles r ON r.id = ur.role_id
@@ -123,15 +123,15 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
 };
 
 
-export const findExistingPerson = async (document_number, document_type_id) => {
-  logger.info(`🔍 Buscando persona con doc ${document_number}`, {label: 'Service'});
+export const findExistingPerson = async (documentNumber, documentTypeId) => {
+  logger.info(`🔍 Buscando persona con doc ${documentNumber}`, {label: 'Service'});
   try {
     const result = await pool.query(
       `SELECT id
        FROM persons p
        WHERE p.document_number = $1
          AND p.document_type_id = $2`,
-      [document_number, document_type_id]
+      [documentNumber, documentTypeId]
     );
     logger.info(`📄 Persona ${result?.rows[0]?.id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
     return result.rows.length > 0 ? result.rows[0] : {error: 'No se encontrado el usuario.'};
@@ -141,14 +141,14 @@ export const findExistingPerson = async (document_number, document_type_id) => {
   }
 };
 
-export const findDocumentTypeByCode = async (code) => {
-  logger.info(`🔍 Buscando id del tipo de documento ${code}.`, {label: 'Service'});
+export const findDocumentTypeByCode = async (documentType) => {
+  logger.info(`🔍 Buscando id del tipo de documento ${documentType}.`, {label: 'Service'});
   try {
     const result = await pool.query(
       `SELECT id
        FROM document_types dt
        WHERE dt.code = $1`,
-      [code]
+      [documentType]
     );
     const found = result.rows[0] || {};
     logger.info(`📄 Tipo de documento ${found.id ? 'encontrado' : 'no encontrado'}`, {label: 'Service'});
@@ -164,20 +164,20 @@ export const insertPerson = async (client, personData) => {
   logger.info(`➕ Insertando persona`, {label: 'Service'});
   try {
     const {
-      document_type_id,
-      document_number,
-      first_name,
-      last_name,
-      phone_number,
-      nationality,
-      birth_date
+      documentTypeId,
+      documentNumber,
+      firstName,
+      lastName,
+      phoneNumber,
+      nationalityCode,
+      birthDate
     } = personData;
 
     const result = await client.query(
       `INSERT INTO persons (document_type_id, document_number, first_name, last_name, phone_number, nationality,
                             birth_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-      [document_type_id, document_number, first_name, last_name, phone_number, nationality, birth_date]
+      [documentTypeId, documentNumber, firstName, lastName, phoneNumber, nationalityCode, birthDate]
     );
 
     logger.info(`✅ Persona insertada con ID: ${result.rows[0].id}`, {label: 'Service'});
@@ -261,7 +261,7 @@ export const findExistingUser = async (username, email) => {
   logger.info(`🔍 Buscando usuario con username/email`, {label: 'Service'});
   try {
     const result = await pool.query(
-      `SELECT id as "codUser"
+      `SELECT id
        FROM users
        WHERE is_active = true
          AND (username = $1 OR email = $2)`,

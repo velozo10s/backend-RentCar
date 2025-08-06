@@ -46,12 +46,13 @@ export async function loginUser(user, password, context) {
 
     const personData = await findPersonByCodUser(userData.id);
 
+    const {id, role} = data;
     logger.info(`Generando token de acceso.`, {label: 'Service'});
-    const accessToken = jwt.sign(data, process.env.JWT_SECRET, {
+    const accessToken = jwt.sign({id, role}, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
     });
 
-    const refreshToken = jwt.sign(data, process.env.JWT_REFRESH_SECRET, {
+    const refreshToken = jwt.sign({id, role}, process.env.JWT_REFRESH_SECRET, {
       expiresIn: process.env.REFRESH_TOKEN_EXPIRY
     });
 
