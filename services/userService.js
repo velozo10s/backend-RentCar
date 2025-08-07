@@ -12,9 +12,9 @@ export const findPersonByCodUser = async (codUser) => {
                p.birth_date      as               "birthDate",
                p.phone_number    as               "phoneNumber",
                u.is_active       as               "isActive"
-        from persons p
-                 left join users u on p.id = u.person_id
-                 left join document_types dt on p.document_type_id = dt.id
+        from person.persons p
+                 left join "user".users u on p.id = u.person_id
+                 left join person.document_types dt on p.document_type_id = dt.id
         where u.id = $1
     `;
 
@@ -47,9 +47,9 @@ export const findDocumentsByUserId = async (codUser) => {
                d.back_file_path  as "backFilePath",
                d.expiration_date as "expirationDate",
                d.entry_date      as "entryDate"
-        FROM documents d
-                 JOIN persons p ON p.id = d.person_id
-                 JOIN users u ON u.person_id = p.id
+        FROM person.documents d
+                 JOIN person.persons p ON p.id = d.person_id
+                 JOIN "user".users u ON u.person_id = p.id
         WHERE u.id = $1
     `;
 
@@ -75,7 +75,7 @@ export const findDocumentTypeById = async (document_type_id) => {
   try {
     const query = `
         SELECT code, description
-        FROM document_types
+        FROM person.document_types
         WHERE id = $1
     `;
     const values = [document_type_id];
@@ -106,9 +106,9 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
               u.is_email_validated as "isEmailValidated",
               u.password           as "userPassword",
               r.code                  role
-       FROM users u
-                JOIN user_roles ur ON u.id = ur.user_id
-                JOIN roles r ON r.id = ur.role_id
+       FROM "user".users u
+                JOIN "user".user_roles ur ON u.id = ur.user_id
+                JOIN "user".roles r ON r.id = ur.role_id
        WHERE u.is_active = true
          AND (u.username = $1 OR u.email = $2)
          AND r.code = ANY ($3::text[])`,
@@ -128,7 +128,7 @@ export const findExistingPerson = async (documentNumber, documentTypeId) => {
   try {
     const result = await pool.query(
       `SELECT id
-       FROM persons p
+       FROM person.persons p
        WHERE p.document_number = $1
          AND p.document_type_id = $2`,
       [documentNumber, documentTypeId]
@@ -146,7 +146,7 @@ export const findDocumentTypeByCode = async (documentType) => {
   try {
     const result = await pool.query(
       `SELECT id
-       FROM document_types dt
+       FROM person.document_types dt
        WHERE dt.code = $1`,
       [documentType]
     );
@@ -174,8 +174,8 @@ export const insertPerson = async (client, personData) => {
     } = personData;
 
     const result = await client.query(
-      `INSERT INTO persons (document_type_id, document_number, first_name, last_name, phone_number, nationality,
-                            birth_date)
+      `INSERT INTO person.persons (document_type_id, document_number, first_name, last_name, phone_number, nationality,
+                                   birth_date)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING id`,
       [documentTypeId, documentNumber, firstName, lastName, phoneNumber, nationalityCode, birthDate]
@@ -206,7 +206,7 @@ export const insertDocument = async (client, document) => {
   try {
     const existing = await client.query(
       `SELECT front_file_path, back_file_path
-       FROM documents
+       FROM person.documents
        WHERE person_id = $1
          AND type = $2`,
       [person_id, type]
@@ -228,9 +228,9 @@ export const insertDocument = async (client, document) => {
     }
 
     await client.query(
-      `INSERT INTO documents (person_id, type, front_file_path, back_file_path,
-                              expiration_date, entry_date, observations,
-                              uploaded_at, updated_at)
+      `INSERT INTO person.documents (person_id, type, front_file_path, back_file_path,
+                                     expiration_date, entry_date, observations,
+                                     uploaded_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NULL)
        ON CONFLICT (person_id, type) DO UPDATE SET front_file_path = EXCLUDED.front_file_path,
                                                    back_file_path  = EXCLUDED.back_file_path,
@@ -262,7 +262,7 @@ export const findExistingUser = async (username, email) => {
   try {
     const result = await pool.query(
       `SELECT id
-       FROM users
+       FROM "user".users
        WHERE is_active = true
          AND (username = $1 OR email = $2)`,
       [username, email]
@@ -283,7 +283,7 @@ export const insertUser = async (client, userData) => {
 
   try {
     const result = await client.query(
-      `INSERT INTO users (person_id, username, email, password)
+      `INSERT INTO "user".users (person_id, username, email, password)
        VALUES ($1, $2, $3, $4)
        RETURNING id`,
       [personId, username, email, hashedPassword]
@@ -303,7 +303,7 @@ export const getRoleIdByCode = async (client, roleCode) => {
   try {
     const result = await client.query(
       `SELECT id
-       FROM roles
+       FROM "user".roles
        WHERE code = $1`,
       [roleCode]
     );
@@ -320,7 +320,7 @@ export const assignRoleToUser = async (client, userId, roleId) => {
   logger.info(`🎭 Asignando role ${roleId} al usuario ${userId}`, {label: 'Service'});
   try {
     await client.query(
-      `INSERT INTO user_roles (user_id, role_id)
+      `INSERT INTO "user".user_roles (user_id, role_id)
        VALUES ($1, $2)`,
       [userId, roleId]
     );

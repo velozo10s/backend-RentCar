@@ -37,19 +37,24 @@ export const refresh = (req, res) => {
 
   if (!refreshToken) return res.status(401).json({error: 'Token requerido'});
 
-  const data = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
-
-  const storedToken = tokenStore.getRefresh(data.id);
-
-  logger.info(`Verifica validez del token.`, {label: 'Controller'});
-  if (storedToken !== refreshToken) {
-    return res.status(403).json({error: 'Refresh token inválido o vencido'});
-  }
-
   jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET, (err, user) => {
-    if (err) return res.status(403).json({error: 'Token inválido'});
+    if (err) {
+      if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
+        return res.status(401).json({error: 'Unauthorized'});
+      } else {
+        return res.status(403).json({error: 'Invalid token'});
+      }
+    }
 
     const {id, role} = user;
+
+    const storedToken = tokenStore.getRefresh(id);
+
+    logger.info(`Verifica validez del token.`, {label: 'Controller'});
+    if (storedToken !== refreshToken) {
+      return res.status(401).json({error: 'Unauthorized'});
+    }
+
     logger.info(`Genera un nuevo token.`, {label: 'Controller'});
     const newAccessToken = jwt.sign({id, role}, process.env.JWT_SECRET, {
       expiresIn: process.env.ACCESS_TOKEN_EXPIRY
@@ -68,10 +73,18 @@ export const logout = (req, res) => {
   if (accessToken) {
     tokenStore.blacklistAccess(accessToken);
   }
-  logger.info(`Valida el token recibido.`, {label: 'Controller'});
-  const data = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
 
-  tokenStore.removeRefresh(data.codUser);
+  logger.info(`Valida el token recibido.`, {label: 'Controller'});
+  try {
+    const data = jwt.verify(refreshToken, process.env.JWT_REFRESH_SECRET);
+    tokenStore.removeRefresh(data.codUser);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      logger.warn(`Refresh token already expired.`, {label: 'Controller'});
+    } else {
+      logger.error(`Invalid refresh token.`, {label: 'Controller'});
+    }
+  }
 
   logger.info(`Sesión cerrada con éxito.`, {label: 'Controller'});
   res.json({message: 'Sesión cerrada con éxito'});

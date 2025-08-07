@@ -18,9 +18,9 @@ services:
  db:
   image: postgres:15
   environment:
-   POSTGRES_DB: RentCar
-   POSTGRES_USER: postgres
-   POSTGRES_PASSWORD: 12345
+   POSTGRES_DB: rentCar
+   POSTGRES_USER: rentCar_admin
+   POSTGRES_PASSWORD: rentCar_admin
   ports:
    - "5433:5432"
   volumes:

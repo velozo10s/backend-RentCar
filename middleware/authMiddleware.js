@@ -18,9 +18,12 @@ export default (req, res, next) => {
 
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
-      return res.status(403).json({error: 'Token inválido o expirado'});
+      if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
+        return res.status(401).json({error: 'Unauthorized'});
+      } else {
+        return res.status(403).json({error: 'Invalid token'});
+      }
     }
-
     req.user = user;
     next();
   });
