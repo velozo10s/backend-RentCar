@@ -7,6 +7,7 @@ import authRoutes from "./routes/authRoutes.js";
 import userRoutes from './routes/userRoutes.js';
 import vehicleRoutes from "./routes/vehicleRoutes.js";
 import logger from "./utils/logger.js";
+import reservationRoutes from "./routes/reservationRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,7 +18,8 @@ const app = express();
 app.use(express.json());
 app.use('/api/auth/', authRoutes);
 app.use('/api/users/', userRoutes);
-app.use('/api/vehicles', vehicleRoutes);
+app.use('/api/vehicles/', vehicleRoutes);
+app.use('/api/reservations/', reservationRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 5000;

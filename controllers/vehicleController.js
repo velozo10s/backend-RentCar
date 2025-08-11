@@ -1,8 +1,8 @@
 import logger from "../utils/logger.js";
 import {findVehicleById} from "../services/vehicleService.js";
 
-export const getVehicle = async (req, res) => {
-  logger.info(`Ingresa a getVehicle.`, {label: 'Controller'});
+export const getVehicleById = async (req, res) => {
+  logger.info(`Ingresa a getVehicleById.`, {label: 'Controller'});
   const {vehicleId} = req.params;
 
   try {
@@ -18,6 +18,6 @@ export const getVehicle = async (req, res) => {
     console.error('User error: ', error);
     res.status(500).json({error: 'Error interno del servidor.'});
   } finally {
-    logger.info(`Finaliza getUser.`, {label: 'Controller'});
+    logger.info(`Finaliza getVehicleById.`, {label: 'Controller'});
   }
 };

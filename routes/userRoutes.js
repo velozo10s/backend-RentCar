@@ -1,17 +1,26 @@
 import express from 'express';
-import authMiddleware from '../middleware/authMiddleware.js';
+import authMiddleware from '../middlewares/authMiddleware.js';
 import {getUser} from '../controllers/userController.js';
 
 const userRoutes = express.Router();
 
 /**
  * @swagger
- * /api/users/{id}:
+ * tags:
+ *   name: Users
+ *   description: User profiles
+ */
+
+/**
+ * @swagger
+ * /api/users/{codUser}:
  *   get:
  *     summary: Get a user by ID
+ *     tags: [Users]
+ *     security: [{ bearerAuth: [] }]
  *     parameters:
  *       - in: path
- *         name: id
+ *         name: codUser
  *         required: true
  *         schema:
  *           type: integer
