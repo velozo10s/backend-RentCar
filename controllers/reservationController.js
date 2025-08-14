@@ -1,5 +1,21 @@
-import pool from '../config/db.js'; // <- adjust to your pool export
+// controllers/reservationsController.js
 import {DateTime} from 'luxon';
+import logger from '../utils/logger.js';
+import pool from '../config/db.js';
+import {
+  db,
+  fetchVehiclesByIds,
+  findConflictsQuery,
+  getReservationByIdWithUser,
+  getReservationItems,
+  getReservationWithItems,
+  insertReservation,
+  insertReservationItems,
+  listReservationsByCustomer,
+  lockReservationForUpdate,
+  setVehiclesStatusByReservation,
+  updateReservationStatus,
+} from '../services/reservationService.js';
 
 /* ------------------------- helpers ------------------------- */
 
@@ -36,26 +52,6 @@ function computeLineAmount(vehicle, startISO, endISO) {
   return perHourTotal;
 }
 
-/**
- * Checks if any of the vehicles have an overlapping reservation
- * in blocking statuses.
- * Returns: array of { vehicle_id, conflicting_reservation_id } if conflicts exist.
- */
-async function findConflicts(client, vehicleIds, startISO, endISO, {blockingStatuses = ['confirmed', 'active']} = {}) {
-  if (vehicleIds.length === 0) return [];
-  const query = `
-      SELECT ri.vehicle_id, r.id AS conflicting_reservation_id
-      FROM reservation.reservation_items ri
-               JOIN reservation.reservations r ON r.id = ri.reservation_id
-      WHERE ri.vehicle_id = ANY ($1::int[])
-        AND r.status = ANY ($4::text[])
-        AND tstzrange(r.start_at, r.end_at, '[)') && tstzrange($2::timestamptz, $3::timestamptz, '[)')
-      LIMIT 1; -- one is enough to fail
-  `;
-  const {rows} = await client.query(query, [vehicleIds, startISO, endISO, blockingStatuses]);
-  return rows;
-}
-
 /* ------------------------- controllers ------------------------- */
 
 /**
@@ -63,41 +59,66 @@ async function findConflicts(client, vehicleIds, startISO, endISO, {blockingStat
  * Body: { startAt, endAt, vehicleIds: number[], note? }
  */
 export async function createReservation(req, res) {
+  logger.info('Ingresando a createReservation', {
+    label: 'Controller',
+    userId: req.user?.id ?? null,
+  });
+
   const {startAt, endAt, vehicleIds, note} = req.body || {};
   const customerUserId = req.user?.id;
 
-  if (!customerUserId) return res.status(401).json({message: 'Unauthorized'});
+  if (!customerUserId) {
+    logger.warn('Unauthorized createReservation attempt', {label: 'Controller'});
+    return res.status(401).json({message: 'Unauthorized'});
+  }
   if (!startAt || !endAt || !Array.isArray(vehicleIds) || vehicleIds.length === 0) {
-    return res.status(400).json({message: 'startAt, endAt, vehicleIds are required'});
+    logger.warn('Validation error: missing required fields', {
+      label: 'Controller',
+      startAt,
+      endAt,
+      vehicleCount: vehicleIds?.length ?? 0
+    });
+    return res.status(400).json({error: 'startAt, endAt, vehicleIds are required'});
   }
 
   try {
-    // Quick sanity check now; final check will happen on confirm/activate
     if (parseISO(endAt) <= parseISO(startAt)) {
-      return res.status(400).json({message: 'endAt must be after startAt'});
+      logger.warn('Validation error: endAt <= startAt', {label: 'Controller', startAt, endAt});
+      return res.status(400).json({error: 'endAt must be after startAt'});
     }
 
-    await withTransaction(async (client) => {
-      // fetch vehicles
-      const {rows: vehicles} = await client.query(
-        `SELECT id, price_per_hour, price_per_day, is_active, status
-         FROM vehicle.vehicles
-         WHERE id = ANY ($1::int[])`,
-        [vehicleIds]
-      );
+    return await withTransaction(async (client) => {
+      logger.debug('TX started for createReservation', {label: 'Controller'});
 
+      // fetch vehicles
+      const vehicles = await fetchVehiclesByIds(client, vehicleIds);
       if (vehicles.length !== vehicleIds.length) {
-        return res.status(404).json({message: 'One or more vehicles not found'});
+        logger.warn('Not all vehicles found', {
+          label: 'Controller',
+          requested: vehicleIds.length,
+          found: vehicles.length
+        });
+        return res.status(404).json({error: 'One or more vehicles not found'});
       }
       const inactive = vehicles.find(v => !v.is_active);
-      if (inactive) return res.status(409).json({message: `Vehicle ${inactive.id} is inactive`});
+      if (inactive) {
+        logger.warn('Vehicle inactive', {label: 'Controller', vehicleId: inactive.id});
+        return res.status(409).json({error: `Vehicle ${inactive.id} is inactive`});
+      }
 
-      // Optional: at creation time also avoid overlaps with confirmed/active for better UX
-      const conflicts = await findConflicts(client, vehicleIds, startAt, endAt, {blockingStatuses: ['confirmed', 'active']});
+      const maintenance = vehicles.find(v => v.status === 'in maintenance');
+      if (maintenance) {
+        logger.warn('Vehicle in maintenance at creation time', {label: 'Controller', vehicleId: maintenance.id});
+        // not returning, but you could decide to fail here
+      }
+
+      // Optional: avoid overlaps at creation
+      const conflicts = await findConflictsQuery(client, vehicleIds, startAt, endAt, ['confirmed', 'active'], {limitOne: true});
       if (conflicts.length) {
+        logger.info('Conflict found at creation', {label: 'Controller', conflict: conflicts[0]});
         return res.status(409).json({
-          message: 'One or more vehicles are not available',
-          detail: conflicts[0]
+          error: 'One or more vehicles are not available',
+          detail: conflicts[0],
         });
       }
 
@@ -109,48 +130,24 @@ export async function createReservation(req, res) {
         lineAmounts[v.id] = amount;
         total += amount;
       }
+      logger.debug('Computed pricing', {label: 'Controller', total, vehicles: vehicles.length});
 
-      // insert reservation (status: pending)
-      const insertRes = await client.query(
-        `INSERT INTO reservation.reservations
-             (customer_user_id, start_at, end_at, status, note, total_amount)
-         VALUES ($1, $2, $3, 'pending', $4, $5)
-         RETURNING id`,
-        [customerUserId, startAt, endAt, note ?? null, total]
-      );
+      // insert reservation + items
+      const reservationId = await insertReservation(client, {
+        customerUserId, startAt, endAt, note, total,
+      });
+      await insertReservationItems(client, reservationId, vehicleIds, lineAmounts);
 
-      const reservationId = insertRes.rows[0].id;
+      const created = await getReservationWithItems(client, reservationId);
+      logger.info('Reservation created', {label: 'Controller', reservationId});
 
-      // insert items
-      const vids = [];
-      const amounts = [];
-      for (const vid of vehicleIds) {
-        vids.push(vid);
-        amounts.push(lineAmounts[vid]);
-      }
-      await client.query(
-        `
-            INSERT INTO reservation.reservation_items (reservation_id, vehicle_id, line_amount)
-            SELECT $1::int, vid, amt
-            FROM UNNEST($2::int[], $3::numeric[]) AS t(vid, amt)
-        `,
-        [reservationId, vids, amounts]
-      );
-
-      const {rows: created} = await client.query(
-        `SELECT r.*, jsonb_agg(jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)) AS items
-         FROM reservation.reservations r
-                  JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
-         WHERE r.id = $1
-         GROUP BY r.id`,
-        [reservationId]
-      );
-
-      return res.status(201).json(created[0]);
+      return res.status(201).json(created);
     });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({message: 'Internal error'});
+    logger.error('createReservation error', {label: 'Controller', err: err?.message, stack: err?.stack});
+    return res.status(500).json({error: 'Internal error'});
+  } finally {
+    logger.info('Finaliza createReservation', {label: 'Controller'});
   }
 }
 
@@ -159,38 +156,27 @@ export async function createReservation(req, res) {
  * Lists reservations of the authenticated customer.
  */
 export async function listMyReservations(req, res) {
+  logger.info('Ingresa a listMyReservations', {label: 'Controller', userId: req.user?.id ?? null});
+
   const customerUserId = req.user?.id;
   if (!customerUserId) return res.status(401).json({message: 'Unauthorized'});
 
   const status = (req.query.status || 'all').toString();
   const allowed = ['pending', 'confirmed', 'active', 'completed', 'declined', 'cancelled', 'all'];
-  if (!allowed.includes(status)) return res.status(400).json({message: 'Invalid status'});
+  if (!allowed.includes(status)) {
+    logger.warn('Invalid status filter', {label: 'Controller', status});
+    return res.status(400).json({message: 'Invalid status'});
+  }
 
   try {
-    const params = [customerUserId];
-    let where = `r.customer_user_id = $1`;
-    if (status !== 'all') {
-      params.push(status);
-      where += ` AND r.status = $2`;
-    }
-
-    const {rows} = await pool.query(
-      `SELECT r.*,
-              COALESCE(jsonb_agg(
-                       jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
-                                ) FILTER (WHERE ri.id IS NOT NULL), '[]') AS items
-       FROM reservation.reservations r
-                LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
-       WHERE ${where}
-       GROUP BY r.id, r.created_at
-       ORDER BY r.created_at DESC`,
-      params
-    );
-
+    const rows = await listReservationsByCustomer(db, customerUserId, status);
+    logger.debug('listMyReservations result', {label: 'Controller', count: rows.length});
     return res.json(rows);
   } catch (err) {
-    console.error(err);
+    logger.error('listMyReservations error', {label: 'Controller', err: err?.message, stack: err?.stack});
     return res.status(500).json({message: 'Internal error'});
+  } finally {
+    logger.info('Finaliza listMyReservations', {label: 'Controller'});
   }
 }
 
@@ -199,35 +185,35 @@ export async function listMyReservations(req, res) {
  * Authenticated users can see their own reservation. Employees/admins can see all.
  */
 export async function getReservationById(req, res) {
+  logger.info('Ingresa a getReservationById', {label: 'Controller', id: req.params?.id});
+
   const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({message: 'Invalid id'});
+  if (!Number.isInteger(id)) {
+    logger.warn('Invalid id in getReservationById', {label: 'Controller', id: req.params?.id});
+    return res.status(400).json({message: 'Invalid id'});
+  }
 
   try {
-    const {rows} = await pool.query(
-      `SELECT r.*,
-              COALESCE(jsonb_agg(
-                       jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
-                                ) FILTER (WHERE ri.id IS NOT NULL), '[]') AS items,
-              u.username                                                  AS customer_username,
-              u.email                                                     AS customer_email
-       FROM reservation.reservations r
-                LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
-                JOIN "user".users u ON u.id = r.customer_user_id
-       WHERE r.id = $1
-       GROUP BY r.id, u.username, u.email`,
-      [id]
-    );
-    if (!rows.length) return res.status(404).json({message: 'Not found'});
+    const rows = await getReservationByIdWithUser(db, id);
+    if (!rows.length) {
+      logger.info('Reservation not found', {label: 'Controller', id});
+      return res.status(404).json({message: 'Not found'});
+    }
 
     const r = rows[0];
     const isOwner = r.customer_user_id === req.user?.id;
-    const isStaff = Array.isArray(req.user?.roles) && req.user.roles.some(r => r === 'employee' || r === 'admin');
-    if (!isOwner && !isStaff) return res.status(403).json({message: 'Forbidden'});
+    const isStaff = Array.isArray(req.user?.roles) && req.user.roles.some(role => role === 'employee' || role === 'admin');
+    if (!isOwner && !isStaff) {
+      logger.warn('Forbidden access to reservation', {label: 'Controller', id, requester: req.user?.id ?? null});
+      return res.status(403).json({message: 'Forbidden'});
+    }
 
     return res.json(r);
   } catch (err) {
-    console.error(err);
+    logger.error('getReservationById error', {label: 'Controller', err: err?.message, stack: err?.stack});
     return res.status(500).json({message: 'Internal error'});
+  } finally {
+    logger.info('Finaliza getReservationById', {label: 'Controller'});
   }
 }
 
@@ -236,94 +222,104 @@ export async function getReservationById(req, res) {
  * Only the owner can cancel, and only before start time.
  */
 export async function cancelReservation(req, res) {
+  logger.info('Ingresa a cancelReservation', {label: 'Controller', id: req.params?.id});
+
   const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({message: 'Invalid id'});
+  if (!Number.isInteger(id)) {
+    logger.warn('Invalid id in cancelReservation', {label: 'Controller', id: req.params?.id});
+    return res.status(400).json({message: 'Invalid id'});
+  }
 
   try {
-    await withTransaction(async (client) => {
-      const {rows} = await client.query(`SELECT *
-                                         FROM reservation.reservations
-                                         WHERE id = $1 FOR UPDATE`, [id]);
+    return await withTransaction(async (client) => {
+      logger.debug('TX started for cancelReservation', {label: 'Controller', id});
+
+      const rows = await lockReservationForUpdate(client, id);
       if (!rows.length) return res.status(404).json({message: 'Not found'});
 
       const r = rows[0];
-      if (r.customer_user_id !== req.user?.id) return res.status(403).json({message: 'Not your reservation'});
+      if (r.customer_user_id !== req.user?.id) {
+        logger.warn('Cancel not owner', {label: 'Controller', id, requester: req.user?.id ?? null});
+        return res.status(403).json({message: 'Not your reservation'});
+      }
 
       if (['cancelled', 'declined', 'completed'].includes(r.status)) {
+        logger.warn('Cancel invalid status', {label: 'Controller', id, status: r.status});
         return res.status(400).json({message: `Cannot cancel a ${r.status} reservation`});
       }
 
       if (DateTime.fromJSDate(r.start_at) <= DateTime.now()) {
+        logger.warn('Cancel after start time blocked', {label: 'Controller', id});
         return res.status(400).json({message: 'Cannot cancel after start time'});
       }
 
-      const {rows: updated} = await client.query(
-        `UPDATE reservation.reservations
-         SET status     = 'cancelled',
-             updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [id]
-      );
+      const updated = await updateReservationStatus(client, id, 'cancelled');
+      logger.info('Reservation cancelled', {label: 'Controller', id});
 
-      return res.json(updated[0]);
+      return res.json(updated);
     });
+
   } catch (err) {
-    console.error(err);
+    logger.error('cancelReservation error', {label: 'Controller', err: err?.message, stack: err?.stack});
     return res.status(500).json({message: 'Internal error'});
+  } finally {
+    logger.info('Finaliza cancelReservation', {label: 'Controller'});
   }
 }
 
-/**
- * Staff actions below: confirm / decline / activate / complete
- * All run inside transactions and re-check conflicts where relevant.
- */
+/* ------------------------- staff actions ------------------------- */
 
 export async function confirmReservation(req, res) {
-  await staffChangeStatusWithAvailability(req, res, {
+  return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'confirmed',
     checkAvailability: true,
-    blockingStatuses: ['confirmed', 'active'] // block against these
+    blockingStatuses: ['confirmed', 'active'],
   });
 }
 
 export async function declineReservation(req, res) {
-  await staffChangeStatusWithAvailability(req, res, {
+  return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'declined',
-    checkAvailability: false
+    checkAvailability: false,
   });
 }
 
 export async function activateReservation(req, res) {
-  await staffChangeStatusWithAvailability(req, res, {
+  return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'active',
     checkAvailability: true,
-    blockingStatuses: ['confirmed', 'active'] // at pick-up time, avoid double assignment
+    blockingStatuses: ['confirmed', 'active'],
   });
 }
 
 export async function completeReservation(req, res) {
-  await staffChangeStatusWithAvailability(req, res, {
+  return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'completed',
-    checkAvailability: false
+    checkAvailability: false,
   });
 }
 
 /* ------------------------- shared staff helper ------------------------- */
 
 async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAvailability, blockingStatuses = []}) {
+  logger.info('Ingresa a staffChangeStatusWithAvailability', {
+    label: 'Controller',
+    id: req.params?.id,
+    nextStatus, checkAvailability, blockingStatuses,
+  });
+
   const id = Number(req.params.id);
-  if (!Number.isInteger(id)) return res.status(400).json({message: 'Invalid id'});
+  if (!Number.isInteger(id)) {
+    logger.warn('Invalid id in staffChangeStatusWithAvailability', {label: 'Controller', id: req.params?.id});
+    return res.status(400).json({message: 'Invalid id'});
+  }
 
   try {
-    await withTransaction(async (client) => {
-      // lock the reservation
-      const {rows} = await client.query(
-        `SELECT *
-         FROM reservation.reservations
-         WHERE id = $1 FOR UPDATE`,
-        [id]
-      );
+    return await withTransaction(async (client) => {
+      logger.debug('TX started for staffChangeStatusWithAvailability', {label: 'Controller', id, nextStatus});
+
+      // lock reservation
+      const rows = await lockReservationForUpdate(client, id);
       if (!rows.length) return res.status(404).json({message: 'Not found'});
       const r = rows[0];
 
@@ -332,76 +328,51 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
         confirmed: ['pending'],
         declined: ['pending'],
         active: ['confirmed'],
-        completed: ['active']
+        completed: ['active'],
       }[nextStatus] || [];
 
       if (!allowedFrom.includes(r.status)) {
+        logger.warn('Illegal status transition', {label: 'Controller', from: r.status, to: nextStatus, id});
         return res.status(400).json({message: `Cannot move from ${r.status} to ${nextStatus}`});
       }
 
       // fetch items
-      const {rows: items} = await client.query(
-        `SELECT vehicle_id, line_amount
-         FROM reservation.reservation_items
-         WHERE reservation_id = $1`,
-        [id]
-      );
+      const items = await getReservationItems(client, id);
       const vehicleIds = items.map(i => i.vehicle_id);
 
       if (checkAvailability) {
-        const conflicts = await findConflicts(client, vehicleIds, r.start_at, r.end_at, {blockingStatuses});
+        const conflicts = await findConflictsQuery(client, vehicleIds, r.start_at, r.end_at, blockingStatuses, {limitOne: true});
         if (conflicts.length) {
+          logger.info('Conflict at status change', {label: 'Controller', id, conflict: conflicts[0]});
           return res.status(409).json({
             message: 'Vehicle no longer available',
-            detail: conflicts[0]
+            detail: conflicts[0],
           });
         }
       }
 
-      // status update
-      const {rows: updated} = await client.query(
-        `UPDATE reservation.reservations
-         SET status     = $2,
-             updated_at = NOW()
-         WHERE id = $1
-         RETURNING *`,
-        [id, nextStatus]
-      );
+      const updated = await updateReservationStatus(client, id, nextStatus);
 
-      // Optional: when activating, you could also flip vehicle.status to 'in use'
       if (nextStatus === 'active') {
-        await client.query(
-          `UPDATE vehicle.vehicles v
-           SET status     = 'in use',
-               updated_at = NOW()
-           FROM reservation.reservation_items ri
-           WHERE ri.reservation_id = $1
-             AND ri.vehicle_id = v.id`,
-          [id]
-        );
+        await setVehiclesStatusByReservation(client, id, 'in use');
+      }
+      if (nextStatus === 'completed') {
+        await setVehiclesStatusByReservation(client, id, 'available');
       }
 
-      // Optional: when completed, flip vehicles back to 'available'
-      if (nextStatus === 'completed') {
-        await client.query(
-          `UPDATE vehicle.vehicles v
-           SET status     = 'available',
-               updated_at = NOW()
-           FROM reservation.reservation_items ri
-           WHERE ri.reservation_id = $1
-             AND ri.vehicle_id = v.id`,
-          [id]
-        );
-      }
+      logger.info('Status changed successfully', {label: 'Controller', id, nextStatus});
 
       return res.json({
-        ...updated[0],
-        items
+        ...updated,
+        items,
       });
     });
+
   } catch (err) {
-    console.error(err);
+    logger.error('staffChangeStatus error', {label: 'Controller', err: err?.message, stack: err?.stack});
     return res.status(500).json({message: 'Internal error'});
+  } finally {
+    logger.info('Finaliza staffChangeStatusWithAvailability', {label: 'Controller'});
   }
 }
 
@@ -411,14 +382,19 @@ async function withTransaction(fn) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    logger.debug('BEGIN', {label: 'DB'});
+
     const result = await fn(client);
-    // controller might have already sent a response; only commit if it didn't early-return
+
     await client.query('COMMIT');
+    logger.debug('COMMIT', {label: 'DB'});
     return result;
   } catch (e) {
     try {
       await client.query('ROLLBACK');
-    } catch {
+      logger.debug('ROLLBACK', {label: 'DB'});
+    } catch (rollErr) {
+      logger.error('ROLLBACK failed', {label: 'DB', err: rollErr?.message, stack: rollErr?.stack});
     }
     throw e;
   } finally {

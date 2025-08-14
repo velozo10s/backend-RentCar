@@ -8,7 +8,7 @@ import pool from "../config/db.js";
 export async function loginUser(user, password, context) {
   logger.info(`Ingresa al loginUser.`, {label: 'Service'});
   if (!user || !password || !context) {
-    return {error: 'Credenciales no ingresadas.'};
+    return {error: 'Credenciales no ingresadas.', localKey: 'backendRes.noCredentials'};
   }
 
   const parseRoles = (rolesStr = '') => {
@@ -42,7 +42,7 @@ export async function loginUser(user, password, context) {
 
     const valid = await bcrypt.compare(password, userPassword);
 
-    if (!valid) return {error: 'Contraseña incorrecta'};
+    if (!valid) return {error: 'Contraseña incorrecta', localKey: 'backendRes.incorrectPassword'};
 
     const personData = await findPersonByCodUser(userData.id);
 

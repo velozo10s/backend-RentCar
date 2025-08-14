@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../middlewares/authMiddleware.js';
-import {getVehicleById} from '../controllers/vehicleController.js';
+import {getVehicleById, listVehicles} from '../controllers/vehicleController.js';
 
 const vehicleRoutes = express.Router();
 
@@ -10,6 +10,39 @@ const vehicleRoutes = express.Router();
  *   name: Vehicles
  *   description: Vehicle catalog
  */
+
+/**
+ * @swagger
+ * /api/vehicles:
+ *   get:
+ *     summary: List vehicles
+ *     tags: [Vehicles]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema: { type: string, enum: ['available','in use','in maintenance','all'] }
+ *         description: Filter by status
+ *       - in: query
+ *         name: brand_id
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: type_id
+ *         schema: { type: integer }
+ *       - in: query
+ *         name: active
+ *         schema: { type: string, enum: ['true','false','all'] }
+ *       - in: query
+ *         name: sort
+ *         schema: { type: string, enum: ['created_at','price_per_hour','price_per_day','year'] }
+ *       - in: query
+ *         name: order
+ *         schema: { type: string, enum: ['asc','desc'] }
+ *     responses:
+ *       200:
+ *         description: List of vehicles
+ */
+vehicleRoutes.get('/', authMiddleware, listVehicles);
 
 /**
  * @swagger

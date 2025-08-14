@@ -19,9 +19,9 @@ export default (req, res, next) => {
   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
     if (err) {
       if (err.name === 'TokenExpiredError' || err.name === 'JsonWebTokenError') {
-        return res.status(401).json({error: 'Unauthorized'});
+        return res.status(401).json({error: 'Unauthorized', localKey: 'backendRes.unauthorized'});
       } else {
-        return res.status(403).json({error: 'Invalid token'});
+        return res.status(403).json({error: 'Invalid token', localKey: 'backendRes.invalidToken'});
       }
     }
     req.user = user;

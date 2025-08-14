@@ -1,5 +1,24 @@
 import logger from "../utils/logger.js";
-import {findVehicleById} from "../services/vehicleService.js";
+import {findVehicleById, listVehiclesByParams} from "../services/vehicleService.js";
+
+export async function listVehicles(req, res) {
+  logger.info(`Ingresa a listVehicles.`, {label: 'Controller'});
+  try {
+    const vehicles = await listVehiclesByParams(req.query);
+
+    if (vehicles.error) {
+      logger.error(`Error: ${vehicles.error}.`, {label: 'Controller'});
+      return res.status(400).json(vehicles);
+    }
+
+    res.json(vehicles);
+  } catch (error) {
+    console.error('User error: ', error);
+    res.status(500).json({error: 'Error interno del servidor.'});
+  } finally {
+    logger.info(`Finaliza listVehicles.`, {label: 'Controller'});
+  }
+}
 
 export const getVehicleById = async (req, res) => {
   logger.info(`Ingresa a getVehicleById.`, {label: 'Controller'});
@@ -15,7 +34,7 @@ export const getVehicleById = async (req, res) => {
 
     res.json(vehicle);
   } catch (error) {
-    console.error('User error: ', error);
+    console.error('Vehicle error: ', error);
     res.status(500).json({error: 'Error interno del servidor.'});
   } finally {
     logger.info(`Finaliza getVehicleById.`, {label: 'Controller'});

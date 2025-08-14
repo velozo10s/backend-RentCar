@@ -23,7 +23,7 @@ export const login = async (req, res) => {
 
   if (result.error) {
     logger.error(`Error: ${result.error}`, {label: 'Controller'});
-    return res.status(401).json({error: result.error});
+    return res.status(401).json(result);
   }
 
   logger.info(`Finaliza login.`, {label: 'Controller'});
