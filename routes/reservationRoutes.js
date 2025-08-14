@@ -77,7 +77,7 @@ const reservationRoutes = express.Router();
  *       409:
  *         description: One or more vehicles are not available
  */
-reservationRoutes.post('/', authMiddleware, createReservation);
+reservationRoutes.post('/', authMiddleware, requireRole(['customer']), createReservation);
 
 /**
  * @swagger
