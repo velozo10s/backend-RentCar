@@ -217,3 +217,53 @@ export const findVehicleById = async (vehicleId) => {
     return {error: 'Ha ocurrido un error, reintente.'};
   }
 }
+
+export const findBrands = async () => {
+  logger.info(`🔍 Buscando marca de vehiculos.`, {label: logLabel});
+  try {
+    const query = `
+        select vb.id, vb.name, vb.country_code
+        from vehicle.vehicle_brands vb
+    `;
+
+    const vehicleBrands = await pool.query(query);
+
+    if (vehicleBrands.rows.length > 0) {
+
+      logger.info(`✅ Marcas encontradas: ${JSON.stringify(vehicleBrands.rows)}`, {label: logLabel});
+
+      return vehicleBrands.rows;
+    } else {
+      logger.info(`⚠️ No se han encontrado marcas.`, {label: logLabel});
+      return {error: 'No se han encontrado marcas:.'};
+    }
+  } catch (error) {
+    logger.error(`❌ Error en el findBrands: ${error.message}`, {label: logLabel});
+    return {error: 'Ha ocurrido un error, reintente.'};
+  }
+}
+
+export const findTypes = async () => {
+  logger.info(`🔍 Buscando tipos de vehiculos.`, {label: logLabel});
+  try {
+    const query = `
+        select vt.id, vt.name, vt.description
+        from vehicle.vehicle_types vt
+    `;
+
+    const vehicleBrands = await pool.query(query);
+
+    if (vehicleBrands.rows.length > 0) {
+
+      logger.info(`✅ Tipos de vehiculos encontrados: ${JSON.stringify(vehicleBrands.rows)}`, {label: logLabel});
+
+      return vehicleBrands.rows;
+    } else {
+      logger.info(`⚠️ No se han encontrado tipos de vehiculos.`, {label: logLabel});
+      return {error: 'No se han encontrado tipos de vehiculos:.'};
+    }
+  } catch (error) {
+    logger.error(`❌ Error en el findTypes: ${error.message}`, {label: logLabel});
+    return {error: 'Ha ocurrido un error, reintente.'};
+  }
+}

@@ -1,6 +1,6 @@
 import express from 'express';
 import authMiddleware from '../middlewares/authMiddleware.js';
-import {getVehicleById, listVehicles} from '../controllers/vehicleController.js';
+import {getVehicleById, listTypes, listVehicles, listBrands} from '../controllers/vehicleController.js';
 
 const vehicleRoutes = express.Router();
 
@@ -46,6 +46,32 @@ vehicleRoutes.get('/', authMiddleware, listVehicles);
 
 /**
  * @swagger
+ * /api/vehicles/brands:
+ *   get:
+ *     summary: List vehicles brands
+ *     tags: [Vehicles]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: List of vehicle brands
+ */
+vehicleRoutes.get('/brands/', authMiddleware, listBrands);
+
+/**
+ * @swagger
+ * /api/vehicles/types:
+ *   get:
+ *     summary: List vehicles types
+ *     tags: [Vehicles]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: List of vehicle types
+ */
+vehicleRoutes.get('/types/', authMiddleware, listTypes);
+
+/**
+ * @swagger
  * /api/vehicles/{vehicleId}:
  *   get:
  *     summary: Get a vehicle by ID
@@ -64,6 +90,7 @@ vehicleRoutes.get('/', authMiddleware, listVehicles);
  *       404:
  *         description: Vehicle not found
  */
-vehicleRoutes.get('/:vehicleId', authMiddleware, getVehicleById);
+vehicleRoutes.get('/:vehicleId', authMiddleware, getVehicleById)
+
 
 export default vehicleRoutes;
