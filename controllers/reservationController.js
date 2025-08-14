@@ -195,20 +195,19 @@ export async function getReservationById(req, res) {
 
   try {
     const rows = await getReservationByIdWithUser(db, id);
-    if (!rows.length) {
-      logger.info('Reservation not found', {label: 'Controller', id});
-      return res.status(404).json({message: 'Not found'});
-    }
+    // if (!rows.length) {
+    //   logger.info('Reservation not found', {label: 'Controller', id});
+    //   return res.status(404).json({message: 'Not found'});
+    // }
 
-    const r = rows[0];
-    const isOwner = r.customer_user_id === req.user?.id;
-    const isStaff = Array.isArray(req.user?.roles) && req.user.roles.some(role => role === 'employee' || role === 'admin');
+    const isOwner = rows.customer_user_id === req.user?.id;
+    const isStaff = req.user.role === 'admin' || req.user.role === 'employee';
     if (!isOwner && !isStaff) {
       logger.warn('Forbidden access to reservation', {label: 'Controller', id, requester: req.user?.id ?? null});
       return res.status(403).json({message: 'Forbidden'});
     }
 
-    return res.json(r);
+    return res.json(rows);
   } catch (err) {
     logger.error('getReservationById error', {label: 'Controller', err: err?.message, stack: err?.stack});
     return res.status(500).json({message: 'Internal error'});

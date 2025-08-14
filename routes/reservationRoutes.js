@@ -139,7 +139,7 @@ reservationRoutes.get('/:id', authMiddleware, getReservationById);
  *       404:
  *         description: Not found
  */
-reservationRoutes.patch('/:id/cancel', authMiddleware, cancelReservation);
+reservationRoutes.patch('/:id/cancel', authMiddleware, requireRole(['customer']), cancelReservation);
 
 /**
  * @swagger

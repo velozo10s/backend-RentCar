@@ -121,7 +121,7 @@ export async function listReservationsByCustomer(clientOrPool, customerUserId, s
 
 export async function getReservationByIdWithUser(clientOrPool, id) {
   logger.info(`🔍 Obteniendo reserva con datos de usuario. ID: ${id}`, {label: logLabel});
-  const {rows} = await clientOrPool.query(
+  const rows = await clientOrPool.query(
     `SELECT r.*,
             COALESCE(jsonb_agg(
                      jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
@@ -135,8 +135,8 @@ export async function getReservationByIdWithUser(clientOrPool, id) {
      GROUP BY r.id, u.username, u.email`,
     [id]
   );
-  logger.info(`✅ Reserva obtenida con datos de usuario: ${rows.length > 0}`, {label: logLabel});
-  return rows;
+  logger.info(`✅ Reserva obtenida con datos de usuario: ${JSON.stringify(rows.rows[0])}`, {label: logLabel});
+  return rows.rows[0];
 }
 
 export async function lockReservationForUpdate(client, id) {

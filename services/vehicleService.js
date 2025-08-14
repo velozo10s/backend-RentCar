@@ -193,7 +193,7 @@ export const findVehicleById = async (vehicleId) => {
                  JOIN vehicle.vehicle_types vt ON v.type_id = vt.id
                  LEFT JOIN vehicle.vehicle_images vi ON vi.vehicle_id = v.id
 
-        WHERE v.id = $1 -- Replace with actual ID or use parameter in code
+        WHERE v.id = $1
 
         GROUP BY v.id, vb.name, c.name, vt.name, vt.description
     `;
