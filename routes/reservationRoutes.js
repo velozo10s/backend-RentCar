@@ -13,6 +13,14 @@ import {
   completeReservation,
 } from '../controllers/reservationController.js';
 
+const parseRoles = (rolesStr = '') =>
+  rolesStr.split(',').map(role => role.trim()).filter(Boolean);
+
+const roleMap = {
+  APP: parseRoles(process.env.APP_ROLES),
+  WEB: parseRoles(process.env.WEB_ROLES)
+};
+
 const reservationRoutes = express.Router();
 
 /**
@@ -77,7 +85,7 @@ const reservationRoutes = express.Router();
  *       409:
  *         description: One or more vehicles are not available
  */
-reservationRoutes.post('/', authMiddleware, requireRole(['customer']), createReservation);
+reservationRoutes.post('/', authMiddleware, requireRole(roleMap['APP']), createReservation);
 
 /**
  * @swagger
@@ -139,7 +147,7 @@ reservationRoutes.get('/:id', authMiddleware, getReservationById);
  *       404:
  *         description: Not found
  */
-reservationRoutes.patch('/:id/cancel', authMiddleware, requireRole(['customer']), cancelReservation);
+reservationRoutes.patch('/:id/cancel', authMiddleware, requireRole(roleMap['APP']), cancelReservation);
 
 /**
  * @swagger
@@ -159,7 +167,7 @@ reservationRoutes.patch('/:id/cancel', authMiddleware, requireRole(['customer'])
  *       409:
  *         description: Vehicle no longer available
  */
-reservationRoutes.patch('/:id/confirm', authMiddleware, requireRole(['employee', 'admin']), confirmReservation);
+reservationRoutes.patch('/:id/confirm', authMiddleware, requireRole(roleMap['WEB']), confirmReservation);
 
 /**
  * @swagger
@@ -169,7 +177,7 @@ reservationRoutes.patch('/:id/confirm', authMiddleware, requireRole(['employee',
  *     tags: [Reservations]
  *     security: [{ bearerAuth: [] }]
  */
-reservationRoutes.patch('/:id/decline', authMiddleware, requireRole(['employee', 'admin']), declineReservation);
+reservationRoutes.patch('/:id/decline', authMiddleware, requireRole(roleMap['WEB']), declineReservation);
 
 /**
  * @swagger
@@ -179,7 +187,7 @@ reservationRoutes.patch('/:id/decline', authMiddleware, requireRole(['employee',
  *     tags: [Reservations]
  *     security: [{ bearerAuth: [] }]
  */
-reservationRoutes.patch('/:id/activate', authMiddleware, requireRole(['employee', 'admin']), activateReservation);
+reservationRoutes.patch('/:id/activate', authMiddleware, requireRole(roleMap['WEB']), activateReservation);
 
 /**
  * @swagger
@@ -189,6 +197,6 @@ reservationRoutes.patch('/:id/activate', authMiddleware, requireRole(['employee'
  *     tags: [Reservations]
  *     security: [{ bearerAuth: [] }]
  */
-reservationRoutes.patch('/:id/complete', authMiddleware, requireRole(['employee', 'admin']), completeReservation);
+reservationRoutes.patch('/:id/complete', authMiddleware, requireRole(roleMap['WEB']), completeReservation);
 
 export default reservationRoutes;

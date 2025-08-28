@@ -216,11 +216,14 @@ export async function listReservations(clientOrPool, {status, customerUserId, li
                                )
                                         ) FILTER (WHERE ri.id IS NOT NULL),
                                '[]'
-               ) AS items
+               )                 AS items,
+               p.document_number AS document_number
         FROM reservation.reservations r
                  LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
+                 JOIN "user".users u ON u.id = r.customer_user_id
+                 JOIN person.persons p on u.person_id = p.id
             ${where}
-        GROUP BY r.id, r.created_at
+        GROUP BY r.id, r.created_at, p.id
         ORDER BY r.created_at DESC
         LIMIT $${limitIdx}
       OFFSET $${offsetIdx}
@@ -235,9 +238,7 @@ export async function listReservations(clientOrPool, {status, customerUserId, li
       return res.rows;
     } else {
       logger.info(`⚠️ No se han encontrado reservas.`, {label: logLabel});
-      return {
-        error: 'No se han encontrado reservas.'
-      };
+      return [];
     }
 
   } catch (error) {
@@ -256,12 +257,17 @@ export async function getReservationByIdWithUser(clientOrPool, id) {
                        jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
                                 ) FILTER (WHERE ri.id IS NOT NULL), '[]') AS items,
               u.username                                                  AS customer_username,
-              u.email                                                     AS customer_email
+              u.email                                                     AS customer_email,
+              p.document_number                                           AS document_number,
+              p.first_name || ' ' || p.last_name                          AS full_name,
+              p.nationality,
+              p.phone_number
        FROM reservation.reservations r
                 LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
                 JOIN "user".users u ON u.id = r.customer_user_id
+                JOIN person.persons p on u.person_id = p.id
        WHERE r.id = $1
-       GROUP BY r.id, u.username, u.email`,
+       GROUP BY r.id, p.id, u.username, u.email`,
       [id]
     );
 

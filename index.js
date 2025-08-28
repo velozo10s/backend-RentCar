@@ -1,4 +1,5 @@
 import express from 'express';
+import cors from 'cors';
 import dotenv from 'dotenv';
 import {fileURLToPath} from 'url';
 import path from 'path';
@@ -15,7 +16,18 @@ const __dirname = path.dirname(__filename);
 dotenv.config();
 const app = express();
 
+app.use(cors({
+  origin: [
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+  ],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+  credentials: true, // <- solo si usas cookies; con Bearer no es necesario
+}));
+
 app.use(express.json());
+
 app.use('/api/auth/', authRoutes);
 app.use('/api/users/', userRoutes);
 app.use('/api/vehicles/', vehicleRoutes);
