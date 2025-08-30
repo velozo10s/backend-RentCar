@@ -2,8 +2,10 @@ import pool from '../config/db.js';
 import fs from 'fs';
 import logger from "../utils/logger.js";
 
+const logLabel = 'userService';
+
 export const findPersonByCodUser = async (codUser) => {
-  logger.info(`🔍 Buscando datos del usuario con id: ${codUser}.`, {label: 'Service'});
+  logger.info(`🔍 Buscando datos del usuario con id: ${codUser}.`, {label: logLabel});
   try {
     const query = `
         select dt.code           as               "documentType",
@@ -19,27 +21,20 @@ export const findPersonByCodUser = async (codUser) => {
     `;
 
     const values = [codUser];
-    const userResult = await pool.query(query, values);
+    const res = await pool.query(query, values);
 
-    if (userResult.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Usuario encontrado: ${JSON.stringify(res.rows)}` : `⚠️ No se ha encontrado el usuario.`}`, {label: logLabel});
 
-      const person = userResult.rows[0];
+    return res.rows.length > 0 ? res.rows[0] : [];
 
-      logger.info(`✅ Datos del usuario con id ${codUser}: ${JSON.stringify(person)}`, {label: 'Service'});
-
-      return person;
-    } else {
-      logger.info(`⚠️ No se ha encontrado una persona asociada al codUser: ${codUser}.`, {label: 'Service'});
-      return {error: 'No existe el usuario con el id enviado.', details: {codUser: codUser}};
-    }
   } catch (error) {
-    logger.error(`❌ Error en el findPersonByCodUser: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en el findPersonByCodUser: ${error.message}`, {label: logLabel});
+    throw error;
   }
 }
 
 export const findDocumentsByUserId = async (codUser) => {
-  logger.info(`🔍 Buscando documentos del usuario con id: ${codUser}.`, {label: 'Service'});
+  logger.info(`🔍 Buscando documentos del usuario con id: ${codUser}.`, {label: logLabel});
   try {
     const query = `
         SELECT d.type,
@@ -54,24 +49,20 @@ export const findDocumentsByUserId = async (codUser) => {
     `;
 
     const values = [codUser];
-    const documentResult = await pool.query(query, values);
+    const res = await pool.query(query, values);
 
-    if (documentResult.rows.length > 0) {
-      logger.info(`✅ Documentos asociados al usuario: ${codUser}: ${JSON.stringify(documentResult.rows)}`, {label: 'Service'});
+    logger.info(`${res.rows.length > 0 ? `✅ Documentos encontrados: ${JSON.stringify(res.rows)}` : `⚠️ No se ha encontrado los documentos.`}`, {label: logLabel});
 
-      return documentResult.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado documentos asociados al usuario: ${codUser}.`, {label: 'Service'});
-      return {error: 'No se encontraron documentos para el id enviado.', details: {codUser: codUser}};
-    }
+    return res.rows.length > 0 ? res.rows : []
+
   } catch (error) {
-    logger.error(`❌ Error en el findDocumentsByUserId: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en el findDocumentsByUserId: ${error.message}`, {label: logLabel});
+    throw error;
   }
 }
 
 export const findDocumentTypeById = async (document_type_id) => {
-  logger.info(`🔍 Buscando tipo de documento con id: ${document_type_id}`, {label: 'Service'});
+  logger.info(`🔍 Buscando tipo de documento con id: ${document_type_id}`, {label: logLabel});
   try {
     const query = `
         SELECT code, description
@@ -79,27 +70,23 @@ export const findDocumentTypeById = async (document_type_id) => {
         WHERE id = $1
     `;
     const values = [document_type_id];
-    const result = await pool.query(query, values);
+    const res = await pool.query(query, values);
 
-    if (result.rows.length > 0) {
-      const foundData = result.rows[0];
-      logger.info(`✅ Tipo de documento encontrado: ${foundData.code}`, {label: 'Service'});
-      return {code: foundData.code, description: foundData.description};
-    } else {
-      logger.info(`⚠️ No se encontró tipo de documento con id: ${document_type_id}`, {label: 'Service'});
-      return {error: 'No existe el tipo de documento con el id enviado.', details: {codDocumentType: document_type_id}};
-    }
+    logger.info(`${res.rows.length > 0 ? `✅ Tipo de documento encontrado: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado el tipo de documento.`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows : []
+
   } catch (error) {
-    logger.error(`❌ Error en findDocumentTypeById: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en findDocumentTypeById: ${error.message}`, {label: logLabel});
+    throw error;
   }
 };
 
 
 export const findUserByUsernameOrEmailAndContext = async (client, username, email, roleCodes) => {
-  logger.info(`🔍 Buscando usuario por username/email en contexto de roles`, {label: 'Service'});
+  logger.info(`🔍 Buscando usuario por username/email en contexto de roles`, {label: logLabel});
   try {
-    const result = await client.query(
+    const res = await client.query(
       `SELECT u.id,
               u.username           as "username",
               u.email,
@@ -114,54 +101,59 @@ export const findUserByUsernameOrEmailAndContext = async (client, username, emai
          AND r.code = ANY ($3::text[])`,
       [username, email, roleCodes]
     );
-    logger.info(`✅ Resultado: ${result.rows.length} usuario(s) encontrados`, {label: 'Service'});
-    return result.rows.length > 0 ? result.rows[0] : {error: 'No se ha encontrado el usuario.'};
+    logger.info(`${res.rows.length > 0 ? `✅ Usuario encontrado: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado el usuario.`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows[0] : [];
   } catch (error) {
-    logger.error(`❌ Error en findUserByUsernameOrEmailAndContext: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en findUserByUsernameOrEmailAndContext: ${error.message}`, {label: logLabel});
+    throw error;
   }
 };
 
 
 export const findExistingPerson = async (documentNumber, documentTypeId) => {
-  logger.info(`🔍 Buscando persona con doc ${documentNumber}`, {label: 'Service'});
+  logger.info(`🔍 Buscando persona con doc ${documentNumber}`, {label: logLabel});
   try {
-    const result = await pool.query(
+    const res = await pool.query(
       `SELECT id
        FROM person.persons p
        WHERE p.document_number = $1
          AND p.document_type_id = $2`,
       [documentNumber, documentTypeId]
     );
-    logger.info(`📄 Persona ${result?.rows[0]?.id ? 'encontrada' : 'no encontrada'}`, {label: 'Service'});
-    return result.rows.length > 0 ? result.rows[0] : {error: 'No se ha encontrado el usuario.'};
+
+    logger.info(`${res.rows.length > 0 ? `✅ Persona: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado la persona.`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows[0] : [];
+
   } catch (error) {
-    logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: logLabel});
+    throw error;
   }
 };
 
 export const findDocumentTypeByCode = async (documentType) => {
-  logger.info(`🔍 Buscando id del tipo de documento ${documentType}.`, {label: 'Service'});
+  logger.info(`🔍 Buscando id del tipo de documento ${documentType}.`, {label: logLabel});
   try {
-    const result = await pool.query(
+    const res = await pool.query(
       `SELECT id
        FROM person.document_types dt
        WHERE dt.code = $1`,
       [documentType]
     );
-    const found = result.rows[0] || {};
-    logger.info(`📄 Tipo de documento ${found.id ? 'encontrado' : 'no encontrado'}`, {label: 'Service'});
-    return found;
+
+    logger.info(`${res.rows.length > 0 ? `✅ Tipo de documento: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado el tipo de documento.`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows[0] : [];
   } catch (error) {
-    logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en findExistingPerson: ${error.message}`, {label: logLabel});
+    throw error;
   }
 };
 
 
 export const insertPerson = async (client, personData) => {
-  logger.info(`➕ Insertando persona`, {label: 'Service'});
+  logger.info(`➕ Insertando persona`, {label: logLabel});
   try {
     const {
       documentTypeId,
@@ -181,10 +173,10 @@ export const insertPerson = async (client, personData) => {
       [documentTypeId, documentNumber, firstName, lastName, phoneNumber, nationalityCode, birthDate]
     );
 
-    logger.info(`✅ Persona insertada con ID: ${result.rows[0].id}`, {label: 'Service'});
+    logger.info(`✅ Persona insertada con ID: ${result.rows[0].id}`, {label: logLabel});
     return result.rows[0].id;
   } catch (error) {
-    logger.error(`❌ Error en insertPerson: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en insertPerson: ${error.message}`, {label: logLabel});
     throw error;
   }
 };
@@ -201,7 +193,7 @@ export const insertDocument = async (client, document) => {
     observations = null
   } = document;
 
-  logger.info(`📤 Insertando documento para persona ${person_id}, tipo ${type}`, {label: 'Service'});
+  logger.info(`📤 Insertando documento para persona ${person_id}, tipo ${type}`, {label: logLabel});
 
   try {
     const existing = await client.query(
@@ -219,10 +211,10 @@ export const insertDocument = async (client, document) => {
         try {
           if (fs.existsSync(path)) {
             fs.unlinkSync(path);
-            logger.info(`🧹 Archivo eliminado: ${path}`, {label: 'Service'});
+            logger.info(`🧹 Archivo eliminado: ${path}`, {label: logLabel});
           }
         } catch (e) {
-          logger.warn(`⚠️ No se pudo eliminar ${path}. ${e.message}`, {label: 'Service'});
+          logger.warn(`⚠️ No se pudo eliminar ${path}. ${e.message}`, {label: logLabel});
         }
       });
     }
@@ -249,37 +241,39 @@ export const insertDocument = async (client, document) => {
       ]
     );
 
-    logger.info(`✅ Documento insertado/actualizado correctamente`, {label: 'Service'});
+    logger.info(`✅ Documento insertado/actualizado correctamente`, {label: logLabel});
   } catch (error) {
-    logger.error(`❌ Error en insertDocument: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en insertDocument: ${error.message}`, {label: logLabel});
     throw error;
   }
 };
 
 
 export const findExistingUser = async (username, email) => {
-  logger.info(`🔍 Buscando usuario con username/email`, {label: 'Service'});
+  logger.info(`🔍 Buscando usuario con username/email`, {label: logLabel});
   try {
-    const result = await pool.query(
+    const res = await pool.query(
       `SELECT id
        FROM "user".users
        WHERE is_active = true
          AND (username = $1 OR email = $2)`,
       [username, email]
     );
-    const found = result.rows[0] || {};
-    logger.info(`📄 Usuario ${found.codUser ? 'encontrado' : 'no encontrado'}`, {label: 'Service'});
-    return found;
+
+    logger.info(`${res.rows.length > 0 ? `✅ Usuario encontrado: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado el usuario.`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows[0] : [];
+
   } catch (error) {
-    logger.error(`❌ Error en findExistingUser: ${error.message}`, {label: 'Service'});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    logger.error(`❌ Error en findExistingUser: ${error.message}`, {label: logLabel});
+    throw error;
   }
 };
 
 
 export const insertUser = async (client, userData) => {
   const {personId, username, email, hashedPassword} = userData;
-  logger.info(`➕ Insertando usuario para persona ${personId}`, {label: 'Service'});
+  logger.info(`➕ Insertando usuario para persona ${personId}`, {label: logLabel});
 
   try {
     const result = await client.query(
@@ -289,17 +283,17 @@ export const insertUser = async (client, userData) => {
       [personId, username, email, hashedPassword]
     );
 
-    logger.info(`✅ Usuario insertado con ID: ${result.rows[0].id}`, {label: 'Service'});
+    logger.info(`✅ Usuario insertado con ID: ${result.rows[0].id}`, {label: logLabel});
     return result.rows[0].id;
   } catch (error) {
-    logger.error(`❌ Error en insertUser: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en insertUser: ${error.message}`, {label: logLabel});
     throw error;
   }
 };
 
 
 export const getRoleIdByCode = async (client, roleCode) => {
-  logger.info(`🔍 Obteniendo role_id para el código: ${roleCode}`, {label: 'Service'});
+  logger.info(`🔍 Obteniendo role_id para el código: ${roleCode}`, {label: logLabel});
   try {
     const result = await client.query(
       `SELECT id
@@ -307,26 +301,26 @@ export const getRoleIdByCode = async (client, roleCode) => {
        WHERE code = $1`,
       [roleCode]
     );
-    logger.info(`✅ Role ID obtenido: ${result.rows[0].id}`, {label: 'Service'});
+    logger.info(`✅ Role ID obtenido: ${result.rows[0].id}`, {label: logLabel});
     return result.rows[0].id;
   } catch (error) {
-    logger.error(`❌ Error en getRoleIdByCode: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en getRoleIdByCode: ${error.message}`, {label: logLabel});
     throw error;
   }
 };
 
 
 export const assignRoleToUser = async (client, userId, roleId) => {
-  logger.info(`🎭 Asignando role ${roleId} al usuario ${userId}`, {label: 'Service'});
+  logger.info(`🎭 Asignando role ${roleId} al usuario ${userId}`, {label: logLabel});
   try {
     await client.query(
       `INSERT INTO "user".user_roles (user_id, role_id)
        VALUES ($1, $2)`,
       [userId, roleId]
     );
-    logger.info(`✅ Rol asignado exitosamente`, {label: 'Service'});
+    logger.info(`✅ Rol asignado exitosamente`, {label: logLabel});
   } catch (error) {
-    logger.error(`❌ Error en assignRoleToUser: ${error.message}`, {label: 'Service'});
+    logger.error(`❌ Error en assignRoleToUser: ${error.message}`, {label: logLabel});
     throw error;
   }
 };

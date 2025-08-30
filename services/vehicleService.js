@@ -130,16 +130,11 @@ export async function listVehiclesByParams(opts = {}) {
 
     logger.info(`📄 Ejecutando consulta de vehículos (página ${page}, límite ${limit})`, {label: logLabel});
 
-    const pageRes = await client.query(pageSql, pageParams);
+    const res = await client.query(pageSql, pageParams);
 
-    if (pageRes.rows.length > 0) {
-      logger.info(`✅ Consulta completada. Vehículos encontrados: ${pageRes.rows.length}`, {label: logLabel});
+    logger.info(`${res.rows.length > 0 ? `✅ Vehiculos encontrados: ${JSON.stringify(res.rows)}` : `⚠️ No se han encontrado los vehiculos.`}`, {label: logLabel});
 
-      return pageRes.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado vehiculos disponibles para el filtro aplicado.`, {label: logLabel});
-      return {error: 'No se han encontrado vehiculos disponibles para el filtro aplicado.'};
-    }
+    return res.rows.length > 0 ? res.rows : [];
 
   } catch (err) {
     logger.error(`❌ Error listando vehículos: ${err.message}`, {label: logLabel});
@@ -199,22 +194,15 @@ export const findVehicleById = async (vehicleId) => {
     `;
 
     const values = [vehicleId];
-    const vehicleResult = await pool.query(query, values);
+    const res = await pool.query(query, values);
 
-    if (vehicleResult.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Vehiculo encontrado: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado el vehiculo.`}`, {label: logLabel});
 
-      const vehicle = vehicleResult.rows[0];
+    return res.rows.length > 0 ? res.rows[0] : []
 
-      logger.info(`✅ Datos del vehiculo con id ${vehicleId}: ${JSON.stringify(vehicle)}`, {label: logLabel});
-
-      return vehicle;
-    } else {
-      logger.info(`⚠️ No se ha encontrado un vehiculo asociado al id: ${vehicleId}.`, {label: logLabel});
-      return {error: 'No existe el vehiculo con el id enviado.', details: {vehicleId: vehicleId}};
-    }
   } catch (error) {
     logger.error(`❌ Error en el findVehicleById: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -226,20 +214,15 @@ export const findBrands = async () => {
         from vehicle.vehicle_brands vb
     `;
 
-    const vehicleBrands = await pool.query(query);
+    const res = await pool.query(query);
 
-    if (vehicleBrands.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Marcas encontradas: ${JSON.stringify(res.rows)}` : `⚠️ No se han encontrado las marcas de vehiculos.`}`, {label: logLabel});
 
-      logger.info(`✅ Marcas encontradas: ${JSON.stringify(vehicleBrands.rows)}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows : []
 
-      return vehicleBrands.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado marcas.`, {label: logLabel});
-      return {error: 'No se han encontrado marcas:.'};
-    }
   } catch (error) {
     logger.error(`❌ Error en el findBrands: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -251,19 +234,34 @@ export const findTypes = async () => {
         from vehicle.vehicle_types vt
     `;
 
-    const vehicleBrands = await pool.query(query);
+    const res = await pool.query(query);
 
-    if (vehicleBrands.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Tipos de vehiculos encontrados: ${JSON.stringify(res.rows)}` : `⚠️ No se han encontrado los tipos de vehiculos.`}`, {label: logLabel});
 
-      logger.info(`✅ Tipos de vehiculos encontrados: ${JSON.stringify(vehicleBrands.rows)}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows : []
 
-      return vehicleBrands.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado tipos de vehiculos.`, {label: logLabel});
-      return {error: 'No se han encontrado tipos de vehiculos:.'};
-    }
   } catch (error) {
     logger.error(`❌ Error en el findTypes: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
+  }
+}
+
+export async function fetchVehiclesByIds(clientOrPool, vehicleIds) {
+  logger.info(`🚗 Buscando vehículos por IDs: ${vehicleIds.join(', ')}`, {label: logLabel, total: vehicleIds.length});
+  try {
+    const res = await clientOrPool.query(
+      `SELECT id, price_per_hour, price_per_day, is_active, status
+       FROM vehicle.vehicles
+       WHERE id = ANY ($1::int[])`,
+      [vehicleIds]
+    );
+
+    logger.info(`${res.rows.length > 0 ? `✅ Vehiculos encontrados: ${JSON.stringify(res.rows)}` : `⚠️ Vehiculos no encontrados`}`, {label: logLabel});
+
+    return res.rows.length > 0 ? res.rows : [];
+
+  } catch (error) {
+    logger.error(`❌ Error en el fetchVehiclesByIds: ${error.message}`, {label: logLabel});
+    throw error;
   }
 }

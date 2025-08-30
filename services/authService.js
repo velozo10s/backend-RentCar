@@ -32,8 +32,11 @@ export async function loginUser(user, password, context) {
     logger.info(`Obteniendo datos del usuario: ${user}`, {label: 'Service'});
     const userData = await findUserByUsernameOrEmailAndContext(client, user, user, roles);
 
-    if (userData.error) {
-      return {error: userData.error};
+    if (!userData?.id) {
+      return {
+        error: 'No se ha encontrado el usuario.',
+        localKey: 'backendRes.userNotFound'
+      };
     }
 
     const {userPassword, ...data} = userData;
@@ -61,7 +64,7 @@ export async function loginUser(user, password, context) {
     return {access: accessToken, refresh: refreshToken, user: {...data, ...personData}};
   } catch (error) {
     logger.error(`Error al iniciar sesion. ${error}`, {label: 'Service'});
-    return {error: 'Error interno del servidor.'};
+    throw error;
   } finally {
     client.release();
   }

@@ -10,15 +10,10 @@ export const getUser = async (req, res) => {
 
     const documents = await findDocumentsByUserId(codUser);
 
-    if (person.error) {
-      logger.error(`Error: ${person.error}.`, {label: 'Controller'});
-      return res.status(400).json({error: person.error});
-    }
-
     res.json({...person, documents});
   } catch (error) {
     console.error('User error: ', error);
-    res.status(500).json({error: 'Error interno del servidor.'});
+    res.status(500).json({error: 'Error interno del servidor.', localKey: 'snackBarMessages.generalError'});
   } finally {
     logger.info(`Finaliza getUser.`, {label: 'Controller'});
   }

@@ -115,7 +115,10 @@ export const register = async (req, res) => {
   logger.info(`Verifica campos obligatorios.`, {label: 'Controller'});
   if (!username || !email || !password || !documentNumber || !firstName) {
     cleanUploadedFiles(req);
-    return res.status(400).json({error: 'Todos los campos son obligatorios.'});
+    return res.status(400).json({
+      error: 'Todos los campos son obligatorios.',
+      localKey: 'backendRes.signUp.noRequiredFields'
+    });
   }
 
   const client = await pool.connect();
@@ -140,7 +143,10 @@ export const register = async (req, res) => {
 
     if (conflictingUsers?.id) {
       cleanUploadedFiles(req);
-      return res.status(409).json({error: 'El usuario ya existe con un rol en este contexto'});
+      return res.status(409).json({
+        error: 'El usuario ya existe con un rol en este contexto',
+        localKey: 'backendRes.signUp.alreadyExists'
+      });
     }
 
     const documentTypeData = await findDocumentTypeByCode(documentType);
@@ -191,6 +197,7 @@ export const register = async (req, res) => {
         }
       }
     }
+    
     const existingUser = await findExistingUser(username, email);
 
     if (!existingUser.id) {
@@ -226,7 +233,7 @@ export const register = async (req, res) => {
 
     cleanUploadedFiles(req);
 
-    return res.status(500).json({error: 'Error interno del servidor.'});
+    return res.status(500).json({error: 'Error interno del servidor.', localKey: 'backendRes.signUpError'});
 
   } finally {
     client.release();

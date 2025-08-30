@@ -4,7 +4,6 @@ import logger from '../utils/logger.js';
 import pool from '../config/db.js';
 import {
   db,
-  fetchVehiclesByIds,
   findConflictsQuery,
   getReservationByIdWithUser,
   getReservationItems,
@@ -16,6 +15,9 @@ import {
   updateReservationStatus,
   listReservations
 } from '../services/reservationService.js';
+import {fetchVehiclesByIds} from "../services/vehicleService.js";
+
+const logLabel = 'reservationController';
 
 /* ------------------------- helpers ------------------------- */
 
@@ -60,7 +62,7 @@ function computeLineAmount(vehicle, startISO, endISO) {
  */
 export async function createReservation(req, res) {
   logger.info('Ingresando a createReservation', {
-    label: 'Controller',
+    label: logLabel,
     userId: req.user?.id ?? null,
   });
 
@@ -68,55 +70,58 @@ export async function createReservation(req, res) {
   const customerUserId = req.user?.id;
 
   if (!customerUserId) {
-    logger.warn('Intento no autorizado de crear una reserva.', {label: 'Controller'});
+    logger.warn('Intento no autorizado de crear una reserva.', {label: logLabel});
     return res.status(401).json({message: 'Unauthorized', localKey: 'backendRes.unauthorized'});
   }
   if (!startAt || !endAt || !Array.isArray(vehicleIds) || vehicleIds.length === 0) {
     logger.warn('Error de validacion: Parametros obligatorios no recibidos.', {
-      label: 'Controller',
+      label: logLabel,
       startAt,
       endAt,
       vehicleCount: vehicleIds?.length ?? 0
     });
-    return res.status(400).json({error: 'Datos obligatorios no recibidos.'});
+    return res.status(400).json({
+      error: 'Datos obligatorios no recibidos.',
+      localKey: 'backendRes.reservation.noRequiredFields'
+    });
   }
 
   try {
     if (parseISO(endAt) <= parseISO(startAt)) {
-      logger.warn('Error de validacion: endAt <= startAt', {label: 'Controller', startAt, endAt});
-      return res.status(400).json({error: 'Fecha fin debe ser posterior a la fecha de inicio.'});
+      logger.warn('Error de validacion: endAt <= startAt', {label: logLabel, startAt, endAt});
+      return res.status(400).json({
+        error: 'Fecha fin debe ser posterior a la fecha de inicio.',
+        localKey: 'vehicles.filters.dateError'
+      });
     }
 
     return await withTransaction(async (client) => {
-      logger.debug('Transaccion iniciada para createReservation.', {label: 'Controller'});
+      logger.debug('Transaccion iniciada para createReservation.', {label: logLabel});
 
       // fetch vehicles
       const vehicles = await fetchVehiclesByIds(client, vehicleIds);
 
-      if (vehicles.error) {
-        logger.error(`Error: ${vehicles.error}.`, {label: 'Controller'});
-        return res.status(400).json(vehicles);
-      }
+      if (!vehicles.length > 0) {
+        return res.status(409).json({
+          error: `Uno o mas vehiculos no fueron encontrados.`,
+          localKey: 'backendRes.reservation.vehiclesNotFound'
+        });
 
-      // if (vehicles.length !== vehicleIds.length) {
-      //   logger.warn('No se encontraron todos los vehiculos.', {
-      //     label: 'Controller',
-      //     requested: vehicleIds.length,
-      //     found: vehicles.length
-      //   });
-      //   return res.status(404).json({error: 'Uno o mas vehiculos no fueron encontrados.'});
-      // }
+      }
 
       const inactive = vehicles.find(v => !v.is_active);
       if (inactive) {
-        logger.warn('Vehiculo inactivo', {label: 'Controller', vehicleId: inactive.id});
-        return res.status(409).json({error: `Vehiculo ${inactive.id} se encuentra en esatado inactivo.`});
+        logger.warn('Vehiculo inactivo', {label: logLabel, vehicleId: inactive.id});
+        return res.status(409).json({
+          error: `Uno o mas vehiculos se encuentran en esatado inactivo.`,
+          localKey: 'backendRes.reservation.inactive'
+        });
       }
 
       const maintenance = vehicles.find(v => v.status === 'in maintenance');
       if (maintenance) {
         logger.warn(`El vehiculo ${maintenance.id} se encuentra en mantenimiento`, {
-          label: 'Controller',
+          label: logLabel,
           vehicleId: maintenance.id
         });
         // not returning, but you could decide to fail here
@@ -124,17 +129,15 @@ export async function createReservation(req, res) {
 
       // Optional: avoid overlaps at creation
       const conflicts = await findConflictsQuery(client, vehicleIds, startAt, endAt, ['confirmed', 'active'], {limitOne: false});
-      if (conflicts.error) {
-        logger.error(`Error: ${conflicts.error}.`, {label: 'Controller'});
-        return res.status(400).json(conflicts);
+
+      if (conflicts) {
+        logger.info('Conflict found at creation', {label: logLabel, conflict: conflicts[0]});
+        return res.status(409).json({
+          error: 'One or more vehicles are not available',
+          localKey: 'backendRes.reservation.confirmed',
+          detail: conflicts[0]
+        });
       }
-      // if (conflicts.length) {
-      //   logger.info('Conflict found at creation', {label: 'Controller', conflict: conflicts[0]});
-      //   return res.status(409).json({
-      //     error: 'One or more vehicles are not available',
-      //     detail: conflicts[0],
-      //   });
-      // }
 
       // compute pricing
       let total = 0;
@@ -144,24 +147,40 @@ export async function createReservation(req, res) {
         lineAmounts[v.id] = amount;
         total += amount;
       }
-      logger.debug('Computed pricing', {label: 'Controller', total, vehicles: vehicles.length});
+      logger.debug('Computed pricing', {label: logLabel, total, vehicles: vehicles.length});
 
       // insert reservation + items
       const reservationId = await insertReservation(client, {
         customerUserId, startAt, endAt, note, total,
       });
+
+      if (!reservationId) {
+        return res.status(409).json({
+          error: 'No se ha podido insertar la reserva, reintente.',
+          localKey: 'backendRes.reservation.error'
+        });
+      }
+
       await insertReservationItems(client, reservationId, vehicleIds, lineAmounts);
 
       const created = await getReservationWithItems(client, reservationId);
-      logger.info(`Reservation created: ${created}`, {label: 'Controller', reservationId});
+
+      if (!created) {
+        return res.status(409).json({
+          error: 'No se ha podido insertar la reserva, reintente.',
+          localKey: 'backendRes.reservation.error'
+        });
+      }
+
+      logger.info(`Reservation created: ${created}`, {label: logLabel, reservationId});
 
       return res.status(201).json(created);
     });
   } catch (err) {
-    logger.error('createReservation error', {label: 'Controller', err: err?.message, stack: err?.stack});
-    return res.status(500).json({error: 'Internal error'});
+    logger.error(`createReservation error ${err}`, {label: logLabel, err: err?.message, stack: err?.stack});
+    return res.status(500).json({error: 'Internal error', localKey: 'snackBarMessages.generalError'});
   } finally {
-    logger.info('Finaliza createReservation', {label: 'Controller'});
+    logger.info('Finaliza createReservation', {label: logLabel});
   }
 }
 
@@ -171,21 +190,21 @@ export async function createReservation(req, res) {
  */
 export async function listMyReservations(req, res) {
   logger.info('Ingresa a listMyReservations', {
-    label: 'Controller',
+    label: logLabel,
     userId: req.user?.id ?? null,
     role: req.user?.role ?? null,
   });
 
   const userId = req.user?.id;
   const role = (req.user?.role || '').toLowerCase();
-  if (!userId || !role) return res.status(401).json({message: 'Unauthorized'});
+  if (!userId || !role) return res.status(401).json({message: 'Unauthorized', localKey: 'backendRes.unauthorized'});
 
   // validación de status
   const status = (req.query.status || 'all').toString();
   const allowedStatus = ['pending', 'confirmed', 'active', 'completed', 'declined', 'cancelled', 'all'];
   if (!allowedStatus.includes(status)) {
-    logger.warn('Filtro de estado invalido.', {label: 'Controller', status});
-    return res.status(400).json({message: 'Invalid status'});
+    logger.warn('Filtro de estado invalido.', {label: logLabel, status});
+    return res.status(400).json({message: 'Invalid status', localKey: 'backendRes.reservation.invalidStatus'});
   }
 
   // paginación segura
@@ -201,7 +220,10 @@ export async function listMyReservations(req, res) {
     if (req.query.customer_user_id) {
       const parsed = parseInt(String(req.query.customer_user_id), 10);
       if (Number.isNaN(parsed) || parsed <= 0) {
-        return res.status(400).json({message: 'Invalid customer_user_id'});
+        return res.status(400).json({
+          message: 'Invalid customer_user_id',
+          localKey: 'backendRes.reservation.invalidId'
+        });
       }
       customerUserId = parsed;
     }
@@ -218,21 +240,16 @@ export async function listMyReservations(req, res) {
       offset,
     });
 
-    if (reservations.error) {
-      logger.error(`Error: ${reservations.error}.`, {label: 'Controller'});
-      return res.status(400).json(reservations);
-    }
-
     return res.json(reservations);
   } catch (err) {
     logger.error('listMyReservations error', {
-      label: 'Controller',
+      label: logLabel,
       err: err?.message,
       stack: err?.stack,
     });
-    return res.status(500).json({message: 'Internal error'});
+    return res.status(500).json({message: 'Internal error', localKey: 'snackBarMessages.generalError'});
   } finally {
-    logger.info('Finaliza listMyReservations', {label: 'Controller'});
+    logger.info('Finaliza listMyReservations', {label: logLabel});
   }
 }
 
@@ -241,34 +258,41 @@ export async function listMyReservations(req, res) {
  * Authenticated users can see their own reservation. Employees/admins can see all.
  */
 export async function getReservationById(req, res) {
-  logger.info('Ingresa a getReservationById', {label: 'Controller', id: req.params?.id});
+  logger.info('Ingresa a getReservationById', {label: logLabel, id: req.params?.id});
 
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    logger.warn('Campo id invalido en getReservationById.', {label: 'Controller', id: req.params?.id});
-    return res.status(400).json({message: 'Invalid id'});
+    logger.warn('Campo id invalido en getReservationById.', {label: logLabel, id: req.params?.id});
+    return res.status(400).json({message: 'Invalid id', localKey: 'backendRes.reservation.invalidId'});
   }
 
   try {
     const rows = await getReservationByIdWithUser(db, id);
-    // if (!rows.length) {
-    //   logger.info('Reservation not found', {label: 'Controller', id});
-    //   return res.status(404).json({message: 'Not found'});
-    // }
 
     const isOwner = rows.customer_user_id === req.user?.id;
-    const isStaff = req.user.role === 'admin' || req.user.role === 'employee';
+
+    const parseRoles = (rolesStr = '') =>
+      rolesStr.split(',').map(role => role.trim()).filter(Boolean);
+
+    const roleMap = {
+      APP: parseRoles(process.env.APP_ROLES),
+      WEB: parseRoles(process.env.WEB_ROLES)
+    };
+
+    // Middleware o función para chequear si es staff
+    const isStaff = roleMap.WEB.includes(req.user?.role);
+
     if (!isOwner && !isStaff) {
-      logger.warn('Acceso no autorizado a getReservation', {label: 'Controller', id, requester: req.user?.id ?? null});
-      return res.status(403).json({message: 'Forbidden: insufficient permissions'});
+      logger.warn('Acceso no autorizado a getReservation', {label: logLabel, id, requester: req.user?.id ?? null});
+      return res.status(403).json({message: 'Forbidden: insufficient permissions', localKey: 'backendRes.forbidden'});
     }
 
     return res.json(rows);
   } catch (err) {
-    logger.error('Error en getReservationById.', {label: 'Controller', err: err?.message, stack: err?.stack});
-    return res.status(500).json({message: 'Internal error'});
+    logger.error('Error en getReservationById.', {label: logLabel, err: err?.message, stack: err?.stack});
+    return res.status(500).json({message: 'Internal error', localKey: 'snackBarMessages.generalError'});
   } finally {
-    logger.info('Finaliza getReservationById', {label: 'Controller'});
+    logger.info('Finaliza getReservationById', {label: logLabel});
   }
 }
 
@@ -277,48 +301,59 @@ export async function getReservationById(req, res) {
  * Only the owner can cancel, and only before start time.
  */
 export async function cancelReservation(req, res) {
-  logger.info('Ingresa a cancelReservation', {label: 'Controller', id: req.params?.id});
+  logger.info('Ingresa a cancelReservation', {label: logLabel, id: req.params?.id});
 
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
-    logger.warn('El id recibido es invalido.', {label: 'Controller', id: req.params?.id});
-    return res.status(400).json({message: 'Invalid id'});
+    logger.warn('El id recibido es invalido.', {label: logLabel, id: req.params?.id});
+    return res.status(400).json({message: 'Invalid id', localKey: 'backendRes.reservation.invalidId'});
   }
 
   try {
     return await withTransaction(async (client) => {
-      logger.debug('Transaccion iniciada en cancelReservation', {label: 'Controller', id});
+      logger.debug('Transaccion iniciada en cancelReservation', {label: logLabel, id});
 
       const rows = await lockReservationForUpdate(client, id);
-      if (!rows.length) return res.status(404).json({message: 'Not found'});
+      if (!rows) return res.status(404).json({
+        message: 'Not found',
+        localKey: 'backendRes.reservation.reservationNotFound'
+      });
 
-      const r = rows[0];
-      if (r.customer_user_id !== req.user?.id) {
-        logger.warn('Cancel not owner', {label: 'Controller', id, requester: req.user?.id ?? null});
-        return res.status(403).json({message: 'Not your reservation'});
+      if (rows.customer_user_id !== req.user?.id) {
+        logger.warn('Cancel not owner', {label: logLabel, id, requester: req.user?.id ?? null});
+        return res.status(403).json({
+          message: 'Not your reservation',
+          localKey: 'backendRes.reservation.notOwner'
+        });
       }
 
-      if (['cancelled', 'declined', 'completed'].includes(r.status)) {
-        logger.warn('Cancel invalid status', {label: 'Controller', id, status: r.status});
-        return res.status(400).json({message: `Cannot cancel a ${r.status} reservation`});
+      if (['cancelled', 'declined', 'completed'].includes(rows.status)) {
+        logger.warn('Cancel invalid status', {label: logLabel, id, status: rows.status});
+        return res.status(400).json({
+          message: `Cannot cancel a ${rows.status} reservation`,
+          localKey: 'backendRes.reservation.invalidStatus'
+        });
       }
 
-      if (DateTime.fromJSDate(r.start_at) <= DateTime.now()) {
-        logger.warn('Cancel after start time blocked', {label: 'Controller', id});
-        return res.status(400).json({message: 'Cannot cancel after start time'});
+      if (DateTime.fromJSDate(rows.start_at) <= DateTime.now()) {
+        logger.warn('Cancel after start time blocked', {label: logLabel, id});
+        return res.status(400).json({
+          message: 'Cannot cancel after start time',
+          localKey: 'backendRes.reservation.cannotCancelled'
+        });
       }
 
       const updated = await updateReservationStatus(client, id, 'cancelled');
-      logger.info('Reservation cancelled', {label: 'Controller', id});
+      logger.info('Reservation cancelled', {label: logLabel, id});
 
       return res.json(updated);
     });
 
   } catch (err) {
-    logger.error('cancelReservation error', {label: 'Controller', err: err?.message, stack: err?.stack});
-    return res.status(500).json({message: 'Internal error'});
+    logger.error('cancelReservation error', {label: logLabel, err: err?.message, stack: err?.stack});
+    return res.status(500).json({message: 'Internal error', localKey: 'snackBarMessages.generalError'});
   } finally {
-    logger.info('Finaliza cancelReservation', {label: 'Controller'});
+    logger.info('Finaliza cancelReservation', {label: logLabel});
   }
 }
 
@@ -328,7 +363,7 @@ export async function confirmReservation(req, res) {
   return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'confirmed',
     checkAvailability: true,
-    blockingStatuses: ['confirmed', 'active'],
+    blockingStatuses: ['active'],
   });
 }
 
@@ -342,8 +377,7 @@ export async function declineReservation(req, res) {
 export async function activateReservation(req, res) {
   return staffChangeStatusWithAvailability(req, res, {
     nextStatus: 'active',
-    checkAvailability: true,
-    blockingStatuses: ['confirmed', 'active'],
+    checkAvailability: true
   });
 }
 
@@ -358,7 +392,7 @@ export async function completeReservation(req, res) {
 
 async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAvailability, blockingStatuses = []}) {
   logger.info('Ingresa a staffChangeStatusWithAvailability', {
-    label: 'Controller',
+    label: logLabel,
     id: req.params?.id,
     nextStatus, checkAvailability, blockingStatuses,
   });
@@ -366,16 +400,19 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
   const id = Number(req.params.id);
   if (!Number.isInteger(id)) {
     logger.warn('Parametro id invalido en staffChangeStatusWithAvailability', {
-      label: 'Controller',
+      label: logLabel,
       id: req.params?.id
     });
-    return res.status(400).json({message: 'Invalid id'});
+    return res.status(400).json({
+      message: 'Invalid id',
+      localKey: 'backendRes.reservation.invalidId'
+    });
   }
 
   try {
     return await withTransaction(async (client) => {
       logger.debug('Transaccion iniciada para staffChangeStatusWithAvailability', {
-        label: 'Controller',
+        label: logLabel,
         id,
         nextStatus
       });
@@ -383,9 +420,13 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
       // lock reservation
       const reservations = await lockReservationForUpdate(client, id);
 
-      if (reservations.error) {
-        logger.error(`Error: ${reservations.error}.`, {label: 'Controller'});
-        return res.status(400).json(reservations);
+      if (!reservations) {
+        logger.error(`No se ha encontrado la reserva.`, {label: logLabel});
+        return res.status(400).json({
+          message: 'No se ha encontrado la reserva.',
+          localKey: 'backendRes.reservation.reservationNotFound',
+          details: {reservation_id: id}
+        });
       }
 
       // allowed transitions
@@ -398,7 +439,7 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
 
       if (!allowedFrom.includes(reservations.status)) {
         logger.warn('Cambio de estado no permitido.', {
-          label: 'Controller',
+          label: logLabel,
           from: reservations.status,
           to: nextStatus,
           id
@@ -409,26 +450,19 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
       // fetch items
       const items = await getReservationItems(client, id);
 
-      if (items.error) {
-        logger.error(`Error: ${items.error}.`, {label: 'Controller'});
-        return res.status(400).json(items);
-      }
-
       const vehicleIds = items.map(i => i.vehicle_id);
 
       if (checkAvailability) {
         const conflicts = await findConflictsQuery(client, vehicleIds, reservations.start_at, reservations.end_at, blockingStatuses, {limitOne: true});
-        // if (conflicts.length) {
-        //   logger.info('Conflict at status change', {label: 'Controller', id, conflict: conflicts[0]});
-        //   return res.status(409).json({
-        //     message: 'Vehicle no longer available',
-        //     detail: conflicts[0],
-        //   });
-        // }
-        if (conflicts.error) {
-          logger.error(`Error: ${conflicts.error}.`, {label: 'Controller'});
-          return res.status(400).json(conflicts);
+        if (conflicts) {
+          logger.info('Conflict found at creation', {label: logLabel, conflict: conflicts[0]});
+          return res.status(409).json({
+            error: 'One or more vehicles are not available',
+            localKey: 'backendRes.reservation.confirmed',
+            detail: conflicts[0]
+          });
         }
+
       }
 
       const updated = await updateReservationStatus(client, id, nextStatus);
@@ -440,7 +474,7 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
         await setVehiclesStatusByReservation(client, id, 'available');
       }
 
-      logger.info('Estado actualizado exitosamente.', {label: 'Controller', id, nextStatus});
+      logger.info('Estado actualizado exitosamente.', {label: logLabel, id, nextStatus});
 
       return res.json({
         ...updated,
@@ -449,10 +483,10 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
     });
 
   } catch (err) {
-    logger.error(`staffChangeStatus error ${err}`, {label: 'Controller', err: err?.message, stack: err?.stack});
-    return res.status(500).json({message: 'Internal error'});
+    logger.error(`staffChangeStatus error ${err}`, {label: logLabel, err: err?.message, stack: err?.stack});
+    return res.status(500).json({message: 'Internal error', localKey: 'snackBarMessages.generalError'});
   } finally {
-    logger.info('Finaliza staffChangeStatusWithAvailability', {label: 'Controller'});
+    logger.info('Finaliza staffChangeStatusWithAvailability', {label: logLabel});
   }
 }
 

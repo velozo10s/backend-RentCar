@@ -6,38 +6,10 @@ const logLabel = 'ReservationService';
 
 /* ------------------------- read helpers ------------------------- */
 
-export async function fetchVehiclesByIds(clientOrPool, vehicleIds) {
-  logger.info(`🚗 Buscando vehículos por IDs: ${vehicleIds.join(', ')}`, {label: logLabel, total: vehicleIds.length});
-  try {
-    const res = await clientOrPool.query(
-      `SELECT id, price_per_hour, price_per_day, is_active, status
-       FROM vehicle.vehicles
-       WHERE id = ANY ($1::int[])`,
-      [vehicleIds]
-    );
-
-    if (res.rows.length > 0) {
-
-      logger.info(`✅ Vehículos encontrados: ${JSON.stringify(res.rows)}`, {label: logLabel});
-
-      return res.rows;
-    } else {
-      logger.info(`⚠️ Uno o mas vehiculos no fueron encontrados.`, {label: logLabel});
-      return {
-        error: 'Uno o mas vehiculos no fueron encontrados.',
-        details: {vehicleIds: vehicleIds}
-      };
-    }
-  } catch (error) {
-    logger.error(`❌ Error en el fetchVehiclesByIds: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
-  }
-}
-
 export async function findConflictsQuery(clientOrPool, vehicleIds, startISO, endISO, blockingStatuses = ['confirmed', 'active'], {limitOne = false} = {}) {
   logger.info(`🔍 Verificando conflictos de reserva para vehículos: ${vehicleIds}`, {
     label: logLabel,
-    rango: `${startISO} → ${endISO}`,
+    range: `${startISO} → ${endISO}`,
     estados: blockingStatuses
   });
 
@@ -67,21 +39,13 @@ export async function findConflictsQuery(clientOrPool, vehicleIds, startISO, end
       [vehicleIds, startISO, endISO, blockingStatuses]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `⚠️ Conflictos encontrados ${JSON.stringify(res.rows)}` : `✅ Conflictos no encontrados`}`, {label: 'Service'});
 
-      logger.info(`⚠️ Conflictos detectados: ${JSON.stringify(res.rows)}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows : null;
 
-      return {
-        error: 'Ya existe una reserva aprobada para los vehiculos recibidos.',
-        details: {reservation: res.rows},
-      };
-    } else {
-      logger.info(`✅  No se han encontrado conflictos.`, {label: logLabel});
-      return {};
-    }
   } catch (error) {
     logger.error(`❌ Error en el findConflictsQuery: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -101,20 +65,13 @@ export async function insertReservation(client, {customerUserId, startAt, endAt,
       [customerUserId, startAt, endAt, note ?? null, total]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Reserva creada ${JSON.stringify(res.rows[0])}` : '⚠️ Reserva no creada'}`, {label: 'Service'});
 
-      logger.info(`✅ Reserva creada con ID: ${res.rows[0].id}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows[0].id : null;
 
-      return res.rows[0].id;
-    } else {
-      logger.info(`⚠️ No se ha podido insertar la reserva, reintente.`, {label: logLabel});
-      return {
-        error: 'No se ha podido insertar la reserva, reintente.'
-      };
-    }
   } catch (error) {
     logger.error(`❌ Error en el insertReservation: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 
 }
@@ -144,7 +101,7 @@ export async function insertReservationItems(client, reservationId, vehicleIds, 
     logger.info(`✅ Items insertados correctamente para la reserva ${reservationId}`, {label: logLabel});
   } catch (error) {
     logger.error(`❌ Error en el insertReservationItems: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -161,20 +118,14 @@ export async function getReservationWithItems(clientOrPool, reservationId) {
       [reservationId]
     );
 
-    if (res.rows.length > 0) {
 
-      logger.info(`✅ Reserva encontrada: ${!!res.rows[0]}`, {label: logLabel});
+    logger.info(`${res.rows.length > 0 ? `✅ Reserva encontrada ${JSON.stringify(res.rows[0])}` : '⚠️ Reserva no encontrada'}`, {label: 'Service'});
 
-      return res.rows[0];
-    } else {
-      logger.info(`⚠️ No se ha podido encontrar la reserva generada.`, {label: logLabel});
-      return {
-        error: 'No se ha podido encontrar la reserva generada.'
-      };
-    }
+    return res.rows.length > 0 ? res.rows[0] : null;
+
   } catch (error) {
     logger.error(`❌ Error en el getReservationWithItems: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -231,19 +182,13 @@ export async function listReservations(clientOrPool, {status, customerUserId, li
 
     const res = await clientOrPool.query(sql, params);
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Reservas encontradas: ${JSON.stringify(res.rows)}` : `⚠️ No se han encontrado las reservas`}`, {label: logLabel});
 
-      logger.info(`✅ Reservas encontradas: ${JSON.stringify(res.rows)}`, {label: logLabel});
-
-      return res.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado reservas.`, {label: logLabel});
-      return [];
-    }
+    return res.rows.length > 0 ? res.rows : [];
 
   } catch (error) {
     logger.error(`❌ Error en el listReservations: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -253,39 +198,73 @@ export async function getReservationByIdWithUser(clientOrPool, id) {
   try {
     const res = await clientOrPool.query(
       `SELECT r.*,
-              COALESCE(jsonb_agg(
-                       jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
-                                ) FILTER (WHERE ri.id IS NOT NULL), '[]') AS items,
-              u.username                                                  AS customer_username,
-              u.email                                                     AS customer_email,
-              p.document_number                                           AS document_number,
-              p.first_name || ' ' || p.last_name                          AS full_name,
+              COALESCE(
+                              jsonb_agg(
+                              jsonb_build_object(
+                                      'vehicle_id', ri.vehicle_id,
+                                      'line_amount', ri.line_amount
+                              )
+                                  || COALESCE(vj.vehicle, '{}'::jsonb)
+                              ORDER BY ri.id
+                                       ) FILTER (WHERE ri.id IS NOT NULL),
+                              '[]'::jsonb
+              )                                  AS items,
+              u.username                         AS customer_username,
+              u.email                            AS customer_email,
+              p.document_number,
+              p.first_name || ' ' || p.last_name AS full_name,
               p.nationality,
               p.phone_number
        FROM reservation.reservations r
-                LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
+                LEFT JOIN reservation.reservation_items ri
+                          ON ri.reservation_id = r.id
+                LEFT JOIN LATERAL (
+           SELECT jsonb_build_object(
+                          'vehicle_type', vt.name,
+                          'brand_name', vb.name,
+                          'model', v.model,
+                          'year', v.year,
+                          'brand_country', c.name,
+                          'license_plate', v.license_plate,
+                          'vin', v.vin,
+                          'color', v.color,
+                          'transmission', v.transmission,
+                          'seats', v.seats,
+                          'fuel_type', v.fuel_type,
+                          'fuel_capacity', v.fuel_capacity,
+                          'price_per_hour', v.price_per_hour,
+                          'price_per_day', v.price_per_day,
+                          'insurance_fee', v.insurance_fee,
+                          'mileage', v.mileage,
+                          'maintenance_mileage', v.maintenance_mileage,
+                          'status', v.status,
+                          'is_active', v.is_active,
+                          'created_at', v.created_at,
+                          'updated_at', v.updated_at,
+                          'type_name', vt.name,
+                          'vehicle_type_description', vt.description
+                  ) AS vehicle
+           FROM vehicle.vehicles v
+                    JOIN vehicle.vehicle_brands vb ON v.brand_id = vb.id
+                    LEFT JOIN countries c ON vb.country_code = c.code
+                    JOIN vehicle.vehicle_types vt ON v.type_id = vt.id
+           WHERE v.id = ri.vehicle_id
+           ) vj ON TRUE
+
                 JOIN "user".users u ON u.id = r.customer_user_id
-                JOIN person.persons p on u.person_id = p.id
+                JOIN person.persons p ON u.person_id = p.id
        WHERE r.id = $1
        GROUP BY r.id, p.id, u.username, u.email`,
       [id]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Reserva encontrada: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado la reserva`}`, {label: logLabel});
 
-      logger.info(`✅ Reserva encontrada: ${JSON.stringify(res.rows[0])}`, {label: logLabel});
-
-      return res.rows[0];
-    } else {
-      logger.info(`⚠️ No se ha encontrado la reserva.`, {label: logLabel});
-      return {
-        error: 'No se ha encontrado la reserva.'
-      };
-    }
+    return res.rows.length > 0 ? res.rows[0] : [];
 
   } catch (error) {
     logger.error(`❌ Error en el getReservationByIdWithUser: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 
 }
@@ -300,21 +279,13 @@ export async function lockReservationForUpdate(client, id) {
       [id]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Reserva encontrada: ${JSON.stringify(res.rows[0])}` : `⚠️ No se ha encontrado la reserva`}`, {label: logLabel});
 
-      logger.info(`✅ Reserva encontrada: ${JSON.stringify(res.rows[0])}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows[0] : null;
 
-      return res.rows[0];
-    } else {
-      logger.info(`⚠️ No se ha encontrado la reserva.`, {label: logLabel});
-      return {
-        error: 'No se ha encontrado la reserva.',
-        details: {reservation_id: id}
-      };
-    }
   } catch (error) {
     logger.error(`❌ Error en el lockReservationForUpdate: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -329,21 +300,13 @@ export async function getReservationItems(client, reservationId) {
       [reservationId]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? `✅ Items encontrados: ${JSON.stringify(res.rows)}` : `⚠️ No se han encontrado los items`}`, {label: logLabel});
 
-      logger.info(`✅ Items encontrados: ${JSON.stringify(res.rows)}`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows : null;
 
-      return res.rows;
-    } else {
-      logger.info(`⚠️ No se han encontrado los items de la reserva.`, {label: logLabel});
-      return {
-        error: 'No se han encontrado los items de la reserva.',
-        details: {reservation_id: reservationId}
-      };
-    }
   } catch (error) {
     logger.error(`❌ Error en el getReservationItems: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -360,21 +323,13 @@ export async function updateReservationStatus(client, id, nextStatus) {
       [id, nextStatus]
     );
 
-    if (res.rows.length > 0) {
+    logger.info(`${res.rows.length > 0 ? '✅ Estado actualizado correctamente.' : '⚠️ No se ha encontrado la reserva.'}`, {label: logLabel});
 
-      logger.info(`✅ Estado actualizado correctamente.`, {label: logLabel});
+    return res.rows.length > 0 ? res.rows[0] : null;
 
-      return res.rows[0];
-    } else {
-      logger.info(`⚠️ No se ha encontrado la reserva.`, {label: logLabel});
-      return {
-        error: 'No se ha encontrado la reserva.`',
-        details: {reservation_id: id}
-      };
-    }
   } catch (error) {
     logger.error(`❌ Error en el updateReservationStatus: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 }
 
@@ -396,7 +351,7 @@ export async function setVehiclesStatusByReservation(client, reservationId, newS
 
   } catch (error) {
     logger.error(`❌ Error en el setVehiclesStatusByReservation: ${error.message}`, {label: logLabel});
-    return {error: 'Ha ocurrido un error, reintente.'};
+    throw error;
   }
 
 }
