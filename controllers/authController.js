@@ -197,7 +197,7 @@ export const register = async (req, res) => {
         }
       }
     }
-    
+
     const existingUser = await findExistingUser(username, email);
 
     if (!existingUser.id) {
@@ -210,7 +210,7 @@ export const register = async (req, res) => {
         hashedPassword
       });
     } else {
-      userId = existingUser.codUser;
+      userId = existingUser.id;
     }
 
     const roleId = await getRoleIdByCode(client, contextRoles[context][0]);
@@ -233,7 +233,7 @@ export const register = async (req, res) => {
 
     cleanUploadedFiles(req);
 
-    return res.status(500).json({error: 'Error interno del servidor.', localKey: 'backendRes.signUpError'});
+    return res.status(500).json({error: 'Error interno del servidor.', localKey: 'snackBarMessages.signUpError'});
 
   } finally {
     client.release();
