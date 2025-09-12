@@ -444,7 +444,10 @@ async function staffChangeStatusWithAvailability(req, res, {nextStatus, checkAva
           to: nextStatus,
           id
         });
-        return res.status(400).json({message: `Cannot move from ${reservations.status} to ${nextStatus}`});
+        return res.status(400).json({
+          message: `Cannot move from ${reservations.status} to ${nextStatus}`,
+          localKey: 'backendRes.reservation.invalidStatusChange'
+        });
       }
 
       // fetch items
