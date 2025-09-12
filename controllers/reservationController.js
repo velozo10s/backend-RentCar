@@ -135,7 +135,7 @@ export async function createReservation(req, res) {
         return res.status(409).json({
           error: 'One or more vehicles are not available',
           localKey: 'backendRes.reservation.confirmed',
-          detail: conflicts[0]
+          detail: conflicts
         });
       }
 
