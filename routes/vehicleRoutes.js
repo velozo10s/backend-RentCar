@@ -1,6 +1,8 @@
 import express from 'express';
 import authMiddleware from '../middlewares/authMiddleware.js';
-import {getVehicleById, listTypes, listVehicles, listBrands} from '../controllers/vehicleController.js';
+import {getVehicleById, listTypes, listVehicles, listBrands, createVehicle} from '../controllers/vehicleController.js';
+import requireRole from "../middlewares/requireRole.js";
+import {uploadVehicles} from "../config/multerConfig.js";
 
 const vehicleRoutes = express.Router();
 
@@ -91,6 +93,55 @@ vehicleRoutes.get('/types/', authMiddleware, listTypes);
  *         description: Vehicle not found
  */
 vehicleRoutes.get('/:vehicleId', authMiddleware, getVehicleById)
+
+/**
+ * @swagger
+ * /api/vehicles:
+ *   post:
+ *     summary: Create a vehicle with optional images
+ *     tags: [Vehicles]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [brand_id, type_id, model, year, license_plate, price_per_hour]
+ *             properties:
+ *               brand_id: { type: integer, example: 1 }
+ *               type_id:  { type: integer, example: 1 }
+ *               model:    { type: string,  example: "Corolla" }
+ *               year:     { type: integer, example: 2024 }
+ *               license_plate: { type: string, example: "ABC123" }
+ *               price_per_hour: { type: number, format: float, example: 80 }
+ *               price_per_day:  { type: number, format: float, example: 500 }
+ *               transmission:   { type: string, enum: ['manual','automatic'] }
+ *               seats:          { type: integer, example: 5 }
+ *               color:          { type: string, example: "White" }
+ *               fuel_type:      { type: string, example: "petrol" }
+ *               fuel_capacity:  { type: number, format: float, example: 50 }
+ *               insurance_fee:  { type: number, format: float, example: 50 }
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *               make_primary:
+ *                 type: boolean
+ *                 description: If true, the first uploaded image becomes primary
+ *     responses:
+ *       201: { description: Vehicle created }
+ *       400: { description: Validation error }
+ *       409: { description: Conflict (e.g., duplicate license plate) }
+ */
+vehicleRoutes.post(
+  '/',
+  authMiddleware,
+  requireRole(['employee', 'admin']),     // your middleware already supports dynamic env roles
+  uploadVehicles.array('images', 10),    // images[] files
+  createVehicle
+);
 
 
 export default vehicleRoutes;

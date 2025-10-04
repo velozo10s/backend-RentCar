@@ -1,6 +1,6 @@
 import express from 'express';
 import {login, refresh, logout, register} from '../controllers/authController.js';
-import {upload} from '../config/multerConfig.js';
+import {uploadDocs} from '../config/multerConfig.js';
 
 const authRoutes = express.Router();
 
@@ -168,7 +168,7 @@ authRoutes.post('/logout', logout);
  */
 authRoutes.post(
   '/register',
-  upload.fields([
+  uploadDocs.fields([
     {name: 'document_front', maxCount: 1},
     {name: 'document_back', maxCount: 1},
     {name: 'license_front', maxCount: 1},

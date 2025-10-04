@@ -19,6 +19,84 @@ function sqlBool(val) {
   return null;
 }
 
+export async function createVehicleWithImages(payload, imageUrls = [], makePrimary = false, ctx = {}) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    logger.info(`🛠 Construyendo insert the vehiculos: ${JSON.stringify(payload)} y ${JSON.stringify(imageUrls)}`, {
+      label: logLabel
+    });
+
+
+    // build INSERT (parameterized)
+    const fields = [
+      'brand_id', 'type_id', 'model', 'year', 'license_plate', 'vin', 'color', 'transmission',
+      'seats', 'fuel_type', 'fuel_capacity', 'price_per_hour', 'price_per_day', 'insurance_fee', 'maintenance_mileage',
+      'mileage'
+    ];
+    const cols = [];
+    const ph = [];
+    const vals = [];
+    let i = 1;
+
+    for (const f of fields) {
+      if (typeof payload[f] !== 'undefined' && payload[f] !== null) {
+        cols.push(`"${f}"`);
+        ph.push(`$${i++}`);
+        vals.push(payload[f]);
+      }
+    }
+
+    const insertSql = `
+        INSERT INTO vehicle.vehicles (${cols.join(', ')})
+        VALUES (${ph.join(', ')})
+        RETURNING *
+    `;
+
+    logger.info('Inserting vehicle', {label: logLabel, userId: ctx.userId});
+    const {rows} = await client.query(insertSql, vals);
+    const vehicle = rows[0];
+
+    // insert images (if any)
+    let images = [];
+    if (Array.isArray(imageUrls) && imageUrls.length) {
+      if (makePrimary) {
+        await client.query(`UPDATE vehicle.vehicle_images
+                            SET is_primary = false
+                            WHERE vehicle_id = $1`, [vehicle.id]);
+      }
+
+      for (let idx = 0; idx < imageUrls.length; idx++) {
+        const url = imageUrls[idx];
+        const isPrimary = makePrimary ? idx === 0 : false;
+        const {rows: imgRows} = await client.query(
+          `INSERT INTO vehicle.vehicle_images (vehicle_id, url, is_primary)
+           VALUES ($1, $2, $3)
+           RETURNING id, url, is_primary`,
+          [vehicle.id, url, isPrimary]
+        );
+        images.push(imgRows[0]);
+      }
+    }
+
+    await client.query('COMMIT');
+
+    return {
+      ...vehicle,
+      images
+    };
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+    }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function listVehiclesByParams(opts = {}) {
   const {
     q,
