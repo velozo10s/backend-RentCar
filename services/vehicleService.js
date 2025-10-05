@@ -19,6 +19,168 @@ function sqlBool(val) {
   return null;
 }
 
+/** Check if a vehicle can be soft-inactivated.
+ *  Not allowed if there is a reservation in statuses (confirmed, active)
+ *  whose time window is:
+ *   - current:   now ∈ [start_at, end_at)
+ *   - upcoming:  end_at > now()
+ */
+export async function canSoftInactivateVehicleQuery(vehicleId) {
+  const client = await pool.connect();
+  try {
+    const sql = `
+        SELECT r.id
+        FROM reservation.reservation_items ri
+                 JOIN reservation.reservations r ON r.id = ri.reservation_id
+        WHERE ri.vehicle_id = $1
+          AND r.status = ANY ($2::text[])
+          AND r.end_at > NOW()::timestamptz
+        ORDER BY r.start_at
+        LIMIT 1
+    `;
+    const statuses = ['confirmed', 'active'];
+    const {rows} = await client.query(sql, [vehicleId, statuses]);
+    return {allowed: rows.length === 0, nextBlockingReservationId: rows[0]?.id || null};
+  } catch (err) {
+    logger.error(`canSoftInactivateVehicleQuery error: ${err.message}`, {label: logLabel, vehicleId});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function softInactivateVehicleCommand(vehicleId) {
+  const sql = `UPDATE vehicle.vehicles
+               SET is_active  = false,
+                   updated_at = NOW()
+               WHERE id = $1`;
+  const {rowCount} = await pool.query(sql, [vehicleId]);
+  return rowCount > 0;
+}
+
+/** Update vehicle + image operations in one transaction. */
+export async function updateVehicleWithImagesCommand(
+  vehicleId,
+  patch = {},
+  imageOps = {newImageUrls: [], makePrimary: false, deleteImageIds: [], primaryImageId: null},
+  ctx = {}
+) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1) Update fields (partial)
+    if (Object.keys(patch).length) {
+      const sets = [];
+      const vals = [];
+      let i = 1;
+      for (const [k, v] of Object.entries(patch)) {
+        sets.push(`"${k}" = $${i++}`);
+        vals.push(v);
+      }
+      vals.push(vehicleId);
+      const updateSql = `
+          UPDATE vehicle.vehicles
+          SET ${sets.join(', ')},
+              updated_at = NOW()
+          WHERE id = $${vals.length}
+        RETURNING *
+      `;
+      const upd = await client.query(updateSql, vals);
+      if (!upd.rows.length) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+    } else {
+      // ensure the vehicle exists
+      const {rowCount} = await client.query(`SELECT 1
+                                             FROM vehicle.vehicles
+                                             WHERE id = $1`, [vehicleId]);
+      if (!rowCount) {
+        await client.query('ROLLBACK');
+        return null;
+      }
+    }
+
+    // 2) Delete images if requested
+    if (Array.isArray(imageOps.deleteImageIds) && imageOps.deleteImageIds.length) {
+      await client.query(
+        `DELETE
+         FROM vehicle.vehicle_images
+         WHERE vehicle_id = $1
+           AND id = ANY ($2::int[])`,
+        [vehicleId, imageOps.deleteImageIds]
+      );
+    }
+
+    // 3) Insert new images
+    if (Array.isArray(imageOps.newImageUrls) && imageOps.newImageUrls.length) {
+      if (imageOps.makePrimary) {
+        await client.query(`UPDATE vehicle.vehicle_images
+                            SET is_primary = false
+                            WHERE vehicle_id = $1`, [vehicleId]);
+      }
+      for (let idx = 0; idx < imageOps.newImageUrls.length; idx++) {
+        const url = imageOps.newImageUrls[idx];
+        const isPrimary = imageOps.primaryImageId ? false : (imageOps.makePrimary && idx === 0);
+        await client.query(
+          `INSERT INTO vehicle.vehicle_images (vehicle_id, url, is_primary)
+           VALUES ($1, $2, $3)`,
+          [vehicleId, url, isPrimary]
+        );
+      }
+    }
+
+    // 4) Explicitly set a primary image id if provided (overrides)
+    if (imageOps.primaryImageId) {
+      const {rowCount} = await client.query(
+        `SELECT 1
+         FROM vehicle.vehicle_images
+         WHERE id = $1
+           AND vehicle_id = $2`,
+        [imageOps.primaryImageId, vehicleId]
+      );
+      if (rowCount) {
+        await client.query(`UPDATE vehicle.vehicle_images
+                            SET is_primary = false
+                            WHERE vehicle_id = $1`, [vehicleId]);
+        await client.query(`UPDATE vehicle.vehicle_images
+                            SET is_primary = true
+                            WHERE id = $1`, [imageOps.primaryImageId]);
+      }
+    }
+
+    // 5) Return current snapshot
+    const {rows} = await client.query(
+      `
+          SELECT v.*,
+                 COALESCE(
+                         (SELECT jsonb_agg(jsonb_build_object('id', vi.id, 'url', vi.url, 'is_primary', vi.is_primary)
+                                           ORDER BY vi.is_primary DESC, vi.id)
+                          FROM vehicle.vehicle_images vi
+                          WHERE vi.vehicle_id = v.id), '[]'
+                 ) AS images
+          FROM vehicle.vehicles v
+          WHERE v.id = $1
+      `,
+      [vehicleId]
+    );
+
+    await client.query('COMMIT');
+    logger.info('Vehicle updated', {label: logLabel, vehicleId, userId: ctx.userId});
+    return rows[0] || null;
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+    }
+    logger.error(`updateVehicleWithImagesCommand error: ${err.message}`, {label: logLabel, vehicleId});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
 export async function createVehicleWithImages(payload, imageUrls = [], makePrimary = false, ctx = {}) {
   const client = await pool.connect();
   try {
@@ -104,7 +266,7 @@ export async function listVehiclesByParams(opts = {}) {
     type_id,
     seats_min,
     price_max,
-    status = 'available',
+    status = 'available',        // este default lo podés sobreescribir en el controller para staff
     active = 'true',
     sort = 'created_at',
     order = 'desc',
@@ -112,7 +274,10 @@ export async function listVehiclesByParams(opts = {}) {
     per_page = 12,
     startAt,
     endAt,
-    blockStatuses = ['confirmed', 'active']
+    blockStatuses = ['confirmed', 'active'],
+
+    // 🔽 NUEVO: para staff (empleado/admin) poder ignorar solapamiento de reservas
+    ignoreReservationOverlap = false
   } = opts;
 
   logger.info(`🔍 Iniciando búsqueda de vehículos con filtros: ${JSON.stringify(opts)}`, {label: logLabel});
@@ -152,17 +317,25 @@ export async function listVehiclesByParams(opts = {}) {
     where.push(`((v.price_per_day IS NOT NULL AND v.price_per_day <= $${params.length - 1})
                  OR (v.price_per_day IS NULL AND v.price_per_hour <= $${params.length}))`);
   }
-  if (status && status !== 'all') {
-    params.push(status);
-    where.push(`v.status = $${params.length}`);
-  }
+
+  // 🔒 Mantener is_active = true siempre (a menos que explícitamente lo cambies)
   const activeBool = sqlBool(active);
-  if (activeBool !== null) {
+  if (activeBool !== null && activeBool === true) {
     params.push(activeBool);
     where.push(`v.is_active = $${params.length}`);
   }
 
-  if (startAt && endAt) {
+  // 🎯 status: si viene 'all' se ignora; si viene otro, se filtra
+  if (status && status !== 'all') {
+    params.push(status);
+    where.push(`v.status = $${params.length}`);
+  }
+
+  // 📅 Filtro de disponibilidad por reservas:
+  // - cliente con fechas: aplicar
+  // - cliente sin fechas: NO aplica (ya estaba así porque requiere startAt & endAt)
+  // - staff (empleado/admin): NO aplica incluso con fechas
+  if (startAt && endAt && !ignoreReservationOverlap) {
     const pStart = push(startAt);
     const pEnd = push(endAt);
     const pBlock = push(blockStatuses);

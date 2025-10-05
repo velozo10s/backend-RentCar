@@ -1,6 +1,13 @@
 import express from 'express';
 import authMiddleware from '../middlewares/authMiddleware.js';
-import {getVehicleById, listTypes, listVehicles, listBrands, createVehicle} from '../controllers/vehicleController.js';
+import {
+  getVehicleById,
+  listTypes,
+  listVehicles,
+  listBrands,
+  createVehicle,
+  updateVehicle
+} from '../controllers/vehicleController.js';
 import requireRole from "../middlewares/requireRole.js";
 import {uploadVehicles} from "../config/multerConfig.js";
 
@@ -141,6 +148,63 @@ vehicleRoutes.post(
   requireRole(['employee', 'admin']),     // your middleware already supports dynamic env roles
   uploadVehicles.array('images', 10),    // images[] files
   createVehicle
+);
+
+/**
+ * @swagger
+ * /api/vehicles/{vehicleId}:
+ *   patch:
+ *     summary: Update a vehicle (fields and images)
+ *     tags: [Vehicles]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: vehicleId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               model: { type: string }
+ *               year: { type: integer }
+ *               license_plate: { type: string }
+ *               vin: { type: string }
+ *               color: { type: string }
+ *               transmission: { type: string, enum: ['manual','automatic'] }
+ *               seats: { type: integer }
+ *               fuel_type: { type: string }
+ *               fuel_capacity: { type: number, format: float }
+ *               price_per_hour: { type: number, format: float }
+ *               price_per_day: { type: number, format: float }
+ *               insurance_fee: { type: number, format: float }
+ *               status: { type: string, enum: ['available','in use','in maintenance'] }
+ *               is_active: { type: boolean }
+ *               # images mgmt
+ *               images:
+ *                 type: array
+ *                 items: { type: string, format: binary }
+ *               make_primary:
+ *                 type: boolean
+ *               delete_image_ids:
+ *                 type: string
+ *                 description: Comma-separated IDs to delete (e.g. "12,13")
+ *               primary_image_id:
+ *                 type: integer
+ *                 description: Image id to mark primary (overrides make_primary)
+ *     responses:
+ *       200: { description: Vehicle updated }
+ *       404: { description: Vehicle not found }
+ */
+vehicleRoutes.patch(
+  '/:vehicleId',
+  authMiddleware,
+  requireRole(['employee', 'admin']),
+  uploadVehicles.array('images', 10),
+  updateVehicle
 );
 
 
