@@ -7,6 +7,7 @@ import {swaggerDocs} from "./config/swagger.js";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from './routes/userRoutes.js';
 import vehicleRoutes from "./routes/vehicleRoutes.js";
+import employeeRoutes from "./routes/employeeRoutes.js";
 import logger from "./utils/logger.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
 
@@ -33,6 +34,7 @@ app.use('/api/auth/', authRoutes);
 app.use('/api/users/', userRoutes);
 app.use('/api/vehicles/', vehicleRoutes);
 app.use('/api/reservations/', reservationRoutes);
+app.use('/api/employees/', employeeRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 const PORT = process.env.PORT || 5000;

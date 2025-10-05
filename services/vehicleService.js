@@ -402,7 +402,9 @@ export const findVehicleById = async (vehicleId) => {
   try {
     const query = `
         SELECT v.id,
+               vt.id                                                      AS type_id,
                vt.name                                                    AS vehicle_type,
+               vb.id                                                      AS brand_id,
                vb.name                                                    AS brand_name,
                v.model,
                v.year,
@@ -428,6 +430,7 @@ export const findVehicleById = async (vehicleId) => {
 
                COALESCE(json_agg(
                         json_build_object(
+                                'id', vi.id,
                                 'url', vi.url,
                                 'is_primary', vi.is_primary
                         )
@@ -441,7 +444,7 @@ export const findVehicleById = async (vehicleId) => {
 
         WHERE v.id = $1
 
-        GROUP BY v.id, vb.name, c.name, vt.name, vt.description
+        GROUP BY v.id, vb.id, vb.name, c.name, vt.id, vt.name, vt.description
     `;
 
     const values = [vehicleId];
