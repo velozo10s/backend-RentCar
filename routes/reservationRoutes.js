@@ -12,6 +12,7 @@ import {
   activateReservation,
   completeReservation,
 } from '../controllers/reservationController.js';
+import {createRating, getReservationRatings} from "../controllers/ratingController.js";
 
 const parseRoles = (rolesStr = '') =>
   rolesStr.split(',').map(role => role.trim()).filter(Boolean);
@@ -86,6 +87,78 @@ const reservationRoutes = express.Router();
  *         description: One or more vehicles are not available
  */
 reservationRoutes.post('/', authMiddleware, requireRole(roleMap['APP']), createReservation);
+
+
+/**
+ * @swagger
+ * tags:
+ *   name: Ratings
+ *   description: Calificaciones de reservas
+ */
+
+/**
+ * @swagger
+ * /api/reservations/{reservationId}/ratings:
+ *   post:
+ *     summary: Crear calificación para una reserva
+ *     tags: [Ratings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: reservationId
+ *         required: true
+ *         schema: { type: integer }
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [direction, score]
+ *             properties:
+ *               direction:
+ *                 type: string
+ *                 enum: [customer_to_company, employee_to_customer]
+ *               score:
+ *                 type: integer
+ *                 minimum: 1
+ *                 maximum: 5
+ *               comment:
+ *                 type: string
+ *     responses:
+ *       201: { description: Calificación creada }
+ *       400: { description: Validación / reserva no elegible }
+ *       403: { description: No autorizado para esta dirección }
+ *       404: { description: Reserva no encontrada }
+ *       409: { description: Ya existe calificación para esta dirección en la reserva }
+ */
+reservationRoutes.post(
+  '/:reservationId/ratings',
+  authMiddleware,
+  createRating // el controller valida roles según direction
+);
+
+/**
+ * @swagger
+ * /api/reservations/{reservationId}/ratings:
+ *   get:
+ *     summary: Obtener calificación(es) de una reserva
+ *     tags: [Ratings]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: reservationId
+ *         required: true
+ *         schema: { type: integer }
+ *     responses:
+ *       200: { description: Lista de calificaciones (0, 1 o 2 direcciones) }
+ *       404: { description: Reserva no encontrada }
+ */
+reservationRoutes.get(
+  '/:reservationId/ratings',
+  authMiddleware,
+  getReservationRatings
+);
 
 /**
  * @swagger
