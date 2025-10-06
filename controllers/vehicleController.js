@@ -26,7 +26,7 @@ export async function updateVehicle(req, res) {
 
   if (!Number.isInteger(id)) {
     logger.warn(`ID inválido: ${idRaw}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'vehicles.validation.invalid_id', message: 'Invalid id'});
+    return res.status(400).json({localKey: 'backendRes.vehicles.invalidId', message: 'Identificador inválido.'});
   }
 
   try {
@@ -70,8 +70,8 @@ export async function updateVehicle(req, res) {
       if (!allowed) {
         logger.warn(`Inactivación bloqueada por reservas actuales/próximas`, {label: LOG_LABEL});
         return res.status(409).json({
-          localKey: 'vehicles.conflict.upcoming_reservations',
-          message: 'Vehicle has current or upcoming reservations',
+          localKey: 'backendRes.vehicles.upcomingReservations',
+          message: 'El vehículo tiene reservas actuales o próximas.',
           reservation_id: nextBlockingReservationId
         });
       }
@@ -96,7 +96,7 @@ export async function updateVehicle(req, res) {
 
     if (!result) {
       logger.warn(`Vehicle no encontrado (id=${id})`, {label: LOG_LABEL});
-      return res.status(404).json({localKey: 'vehicles.not_found', message: 'Vehicle not found'});
+      return res.status(404).json({localKey: 'backendRes.vehicles.notFound', message: 'Vehículo no encontrado.'});
     }
 
     return res.json(result);
@@ -105,12 +105,15 @@ export async function updateVehicle(req, res) {
     if (msg.includes('unique') || msg.includes('license_plate')) {
       logger.warn(`Conflicto de unicidad al actualizar vehículo: ${err.message}`, {label: LOG_LABEL});
       return res.status(409).json({
-        localKey: 'vehicles.conflict.duplicate',
-        message: 'Unique constraint failed (e.g., license_plate)'
+        localKey: 'backendRes.vehicles.duplicate',
+        message: 'Ya existe un vehículo con los mismos datos (ej. matrícula).'
       });
     }
     logger.error(`Update vehicle failed: ${err.message}`, {label: LOG_LABEL});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza updateVehicle.`, {label: LOG_LABEL});
   }
@@ -135,8 +138,8 @@ export async function createVehicle(req, res) {
       if (req.body[k] == null || req.body[k] === '') {
         logger.warn(`Falta campo requerido: ${k}`, {label: LOG_LABEL});
         return res.status(400).json({
-          localKey: 'vehicles.validation.missing_field',
-          message: `Missing field: ${k}`,
+          localKey: 'backendRes.vehicles.missingField',
+          message: `Falta campo requerido: ${k}`,
           field: k
         });
       }
@@ -186,12 +189,15 @@ export async function createVehicle(req, res) {
     if (msg.includes('unique') || msg.includes('duplicate') || msg.includes('license_plate')) {
       logger.warn(`Conflict creating vehicle: ${err.message}`, {label: LOG_LABEL});
       return res.status(409).json({
-        localKey: 'vehicles.conflict.duplicate',
-        message: 'Vehicle already exists or unique constraint failed'
+        localKey: 'backendRes.vehicles.duplicate',
+        message: 'Ya existe un vehículo con los mismos datos (ej. matrícula).'
       });
     }
     logger.error(`Create vehicle failed: ${err.message}`, {label: LOG_LABEL});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza createVehicle.`, {label: LOG_LABEL});
   }

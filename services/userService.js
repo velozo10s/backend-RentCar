@@ -1,6 +1,9 @@
 import pool from '../config/db.js';
 import fs from 'fs';
 import logger from "../utils/logger.js";
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 const logLabel = 'userService';
 
@@ -8,7 +11,8 @@ export const findPersonByCodUser = async (codUser) => {
   logger.info(`🔍 Buscando datos del usuario con id: ${codUser}.`, {label: logLabel});
   try {
     const query = `
-        select dt.code           as               "documentType",
+        select p.id              as               "personId",
+               dt.code           as               "documentType",
                p.document_number as               "documentNumber",
                p.first_name || ' ' || p.last_name name,
                p.birth_date      as               "birthDate",
@@ -219,6 +223,10 @@ export const insertDocument = async (client, document) => {
       });
     }
 
+    const base = process.env.PUBLIC_BASE_URL;
+    const frontPath = `${base}/${front_file_path.replace(/^\/+/, '')}`;
+    const backPath = `${base}/${back_file_path.replace(/^\/+/, '')}`;
+
     await client.query(
       `INSERT INTO person.documents (person_id, type, front_file_path, back_file_path,
                                      expiration_date, entry_date, observations,
@@ -233,8 +241,8 @@ export const insertDocument = async (client, document) => {
       [
         person_id,
         type,
-        front_file_path,
-        back_file_path,
+        frontPath,
+        backPath,
         expiration_date,
         entry_date,
         observations

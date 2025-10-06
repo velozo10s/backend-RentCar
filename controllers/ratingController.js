@@ -26,7 +26,10 @@ export async function createRating(req, res) {
   const reservationId = Number(reservationIdRaw);
   if (!Number.isInteger(reservationId)) {
     logger.warn(`reservationId inválido: ${reservationIdRaw}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'ratings.validation.invalid_id', message: 'Invalid reservationId'});
+    return res.status(400).json({
+      localKey: 'backendRes.ratings.invalidId',
+      message: 'Identificador de reserva inválido.'
+    });
   }
 
   const {direction, score, comment} = req.body || {};
@@ -36,11 +39,11 @@ export async function createRating(req, res) {
   // Validación básica
   if (!direction || !['customer_to_company', 'employee_to_customer'].includes(direction)) {
     logger.warn(`Dirección inválida: ${direction}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'ratings.validation.direction', message: 'Invalid direction'});
+    return res.status(400).json({localKey: 'backendRes.ratings.invalidDirection', message: 'Dirección inválida.'});
   }
   if (!(Number.isInteger(score) && score >= 1 && score <= 5)) {
     logger.warn(`Score inválido: ${score}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'ratings.validation.score', message: 'Invalid score (1..5)'});
+    return res.status(400).json({localKey: 'backendRes.ratings.invalidScore', message: 'Puntaje inválido (1..5).'});
   }
 
   // Payload normalizado (para trazabilidad)
@@ -65,7 +68,10 @@ export async function createRating(req, res) {
 
     if (!reservation) {
       logger.warn(`Reserva no encontrada (id=${reservationId})`, {label: LOG_LABEL});
-      return res.status(404).json({localKey: 'reservations.not_found', message: 'Reservation not found'});
+      return res.status(404).json({
+        localKey: 'backendRes.reservation.reservationNotFound',
+        message: 'No se ha encontrado la reserva.'
+      });
     }
     if (!(reservation.status === 'completed' && reservation.end_at <= new Date())) {
       logger.warn(`Reserva no elegible para calificación`, {
@@ -74,8 +80,8 @@ export async function createRating(req, res) {
         end_at: reservation.end_at
       });
       return res.status(400).json({
-        localKey: 'ratings.validation.not_eligible',
-        message: 'Reservation is not eligible for rating (must be completed and ended).'
+        localKey: 'backendRes.ratings.notEligible',
+        message: 'La reserva debe estar finalizada para poder calificar.'
       });
     }
 
@@ -84,14 +90,20 @@ export async function createRating(req, res) {
       const isOwner = reservation.customer_user_id === userId;
       logger.info(`Auth customer_to_company: isOwner=${isOwner}`, {label: LOG_LABEL});
       if (!isOwner) {
-        return res.status(403).json({localKey: 'ratings.forbidden.customer', message: 'Not your reservation'});
+        return res.status(403).json({
+          localKey: 'backendRes.reservation.notOwner',
+          message: 'Esta reserva no es tuya.'
+        });
       }
     } else {
       // employee_to_customer
-      const isStaff = role === 'employee' || role === 'admin'; // (log sólo; no cambia tu contrato)
+      const isStaff = role === 'employee' || role === 'admin';
       logger.info(`Auth employee_to_customer: role=${role}, isStaff=${isStaff}`, {label: LOG_LABEL});
       if (!isStaff) {
-        return res.status(403).json({localKey: 'ratings.forbidden.staff', message: 'Backoffice only'});
+        return res.status(403).json({
+          localKey: 'backendRes.forbidden',
+          message: 'No permitido: No cuenta con los permisos suficientes.'
+        });
       }
     }
 
@@ -105,8 +117,8 @@ export async function createRating(req, res) {
 
     if (already) {
       return res.status(409).json({
-        localKey: 'ratings.conflict.already_exists',
-        message: 'A rating for this reservation and direction already exists.'
+        localKey: 'backendRes.ratings.alreadyExists',
+        message: 'Ya existe una calificación para esta reserva y dirección.'
       });
     }
 
@@ -141,12 +153,15 @@ export async function createRating(req, res) {
     if (code === '409' || (err?.message || '').toLowerCase().includes('unique')) {
       logger.warn(`Conflicto de unicidad al crear rating: ${err.message}`, {label: LOG_LABEL});
       return res.status(409).json({
-        localKey: 'ratings.conflict.already_exists',
-        message: 'A rating for this reservation and direction already exists.'
+        localKey: 'backendRes.ratings.alreadyExists',
+        message: 'Ya existe una calificación para esta reserva y dirección.'
       });
     }
     logger.error(`createRating error: ${err.message}`, {label: LOG_LABEL, by: req.user?.id});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza createRating.`, {label: LOG_LABEL});
   }
@@ -168,7 +183,10 @@ export async function getReservationRatings(req, res) {
 
   if (!Number.isInteger(reservationId)) {
     logger.warn(`reservationId inválido: ${reservationIdRaw}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'ratings.validation.invalid_id', message: 'Invalid reservationId'});
+    return res.status(400).json({
+      localKey: 'backendRes.ratings.invalidId',
+      message: 'Identificador de reserva inválido.'
+    });
   }
 
   // ✅ Validar y normalizar direction (opcional)
@@ -178,7 +196,7 @@ export async function getReservationRatings(req, res) {
     const allowed = ['customer_to_company', 'employee_to_customer'];
     if (!allowed.includes(direction)) {
       logger.warn(`direction inválido en query: ${direction}`, {label: LOG_LABEL});
-      return res.status(400).json({localKey: 'ratings.validation.direction', message: 'Invalid direction'});
+      return res.status(400).json({localKey: 'backendRes.ratings.invalidDirection', message: 'Dirección inválida.'});
     }
   } else {
     direction = null; // sin filtro → devuelve todas
@@ -191,7 +209,10 @@ export async function getReservationRatings(req, res) {
     return res.json(rows); // [] si no hay
   } catch (err) {
     logger.error(`getReservationRatings error: ${err.message}`, {label: LOG_LABEL, by: req.user?.id});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza getReservationRatings.`, {label: LOG_LABEL});
   }
@@ -205,7 +226,10 @@ export async function getCompanyStats(_req, res) {
     return res.json(stats);
   } catch (err) {
     logger.error(`getCompanyStats error: ${err.message}`, {label: LOG_LABEL});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza getCompanyStats.`, {label: LOG_LABEL});
   }
@@ -219,7 +243,10 @@ export async function getCustomerStats(req, res) {
   const userId = Number(userIdRaw);
   if (!Number.isInteger(userId)) {
     logger.warn(`userId inválido: ${userIdRaw}`, {label: LOG_LABEL});
-    return res.status(400).json({localKey: 'ratings.validation.invalid_user', message: 'Invalid userId'});
+    return res.status(400).json({
+      localKey: 'backendRes.ratings.invalidUser',
+      message: 'Identificador de usuario inválido.'
+    });
   }
   try {
     const stats = await getCustomerStatsQuery(userId);
@@ -227,7 +254,10 @@ export async function getCustomerStats(req, res) {
     return res.json(stats);
   } catch (err) {
     logger.error(`getCustomerStats error: ${err.message}`, {label: LOG_LABEL, for: userId});
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   } finally {
     logger.info(`Finaliza getCustomerStats.`, {label: LOG_LABEL});
   }

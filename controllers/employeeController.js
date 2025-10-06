@@ -45,7 +45,10 @@ export async function listEmployees(req, res) {
       took_ms: Date.now() - started,
       stack: err.stack
     });
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   }
 }
 
@@ -69,8 +72,8 @@ export async function addEmployee(req, res) {
         body_preview: safeBody({person_id, first_name, last_name, username, email})
       });
       return res.status(400).json({
-        localKey: 'employees.validation.required',
-        message: 'Missing required fields (either person_id or person data) and username/email/password'
+        localKey: 'backendRes.employees.required',
+        message: 'Faltan campos obligatorios (person_id o nombres) y username/email/password.'
       });
     }
 
@@ -92,8 +95,8 @@ export async function addEmployee(req, res) {
     if (msg.includes('users_username_key') || msg.includes('users_email_key') || msg.includes('unique')) {
       logger.warn('addEmployee: conflict (unique)', {label: LOG_LABEL, userId});
       return res.status(409).json({
-        localKey: 'employees.conflict.unique',
-        message: 'Username or email already in use'
+        localKey: 'backendRes.employees.alreadyExists',
+        message: 'El usuario/correo no está disponible.'
       });
     }
 
@@ -103,7 +106,10 @@ export async function addEmployee(req, res) {
       took_ms: Date.now() - started,
       stack: err.stack
     });
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   }
 }
 
@@ -121,7 +127,10 @@ export async function updateEmployee(req, res) {
 
   if (!Number.isInteger(userId)) {
     logger.warn('updateEmployee: invalid id', {label: LOG_LABEL, userId: authUserId, rawId: req.params.userId});
-    return res.status(400).json({localKey: 'employees.validation.invalid_id', message: 'Invalid id'});
+    return res.status(400).json({
+      localKey: 'backendRes.employees.invalidId',
+      message: 'Identificador inválido.'
+    });
   }
 
   try {
@@ -133,7 +142,10 @@ export async function updateEmployee(req, res) {
         targetUserId: userId,
         took_ms: Date.now() - started
       });
-      return res.status(404).json({localKey: 'employees.not_found', message: 'Employee not found'});
+      return res.status(404).json({
+        localKey: 'backendRes.employees.notFound',
+        message: 'Empleado no encontrado.'
+      });
     }
 
     logger.info('updateEmployee: success', {
@@ -151,8 +163,8 @@ export async function updateEmployee(req, res) {
     if (msg.includes('users_username_key') || msg.includes('users_email_key') || msg.includes('unique')) {
       logger.warn('updateEmployee: conflict (unique)', {label: LOG_LABEL, userId: authUserId, targetUserId: userId});
       return res.status(409).json({
-        localKey: 'employees.conflict.unique',
-        message: 'Username or email already in use'
+        localKey: 'backendRes.employees.alreadyExists',
+        message: 'El usuario/correo no está disponible.'
       });
     }
 
@@ -163,6 +175,9 @@ export async function updateEmployee(req, res) {
       took_ms: Date.now() - started,
       stack: err.stack
     });
-    return res.status(500).json({localKey: 'common.internal_error', message: 'Internal error'});
+    return res.status(500).json({
+      localKey: 'snackBarMessages.generalError',
+      message: 'Algo ha salido mal. Por favor reintente o contacte con soporte'
+    });
   }
 }
