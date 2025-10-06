@@ -11,6 +11,7 @@ import employeeRoutes from "./routes/employeeRoutes.js";
 import logger from "./utils/logger.js";
 import reservationRoutes from "./routes/reservationRoutes.js";
 import ratingRoutes from "./routes/ratingRoutes.js";
+import customerRoutes from "./routes/customerRoutes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -36,6 +37,7 @@ app.use('/api/users/', userRoutes);
 app.use('/api/vehicles/', vehicleRoutes);
 app.use('/api/reservations/', reservationRoutes);
 app.use('/api/employees/', employeeRoutes);
+app.use('/api/customers/', customerRoutes);
 app.use('/api/ratings/', ratingRoutes);
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

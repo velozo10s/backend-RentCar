@@ -16,7 +16,6 @@ export async function updateVehicle(req, res) {
   const idRaw = req.params.vehicleId;
   const id = Number(idRaw);
 
-  // Log de parámetros crudos
   logger.info(`Parámetros recibidos: ${JSON.stringify({
     params: req.params,
     query: req.query,
@@ -30,24 +29,63 @@ export async function updateVehicle(req, res) {
   }
 
   try {
-    // --- Normalización ---
+    // --- Normalización segura ---
     const patch = {};
-    const numericFields = ['year', 'seats', 'fuel_capacity', 'price_per_hour', 'price_per_day', 'insurance_fee'];
-    for (const [k, v] of Object.entries(req.body || {})) {
+
+    // 🔒 Campos que NO son columnas de vehicle.vehicles (ignóralos del patch)
+    const nonColumnKeys = new Set([
+      'make_primary',
+      'primary_image_id',
+      'delete_image_ids',
+      'remove_images',
+      'remove_images[]'
+    ]);
+
+    // Si querés ser aún más estricto, lista blanca de columnas válidas:
+    const allowedColumns = new Set([
+      'brand_id', 'type_id', 'model', 'year', 'license_plate', 'transmission', 'seats',
+      'price_per_day', 'price_per_hour', 'vin', 'color', 'mileage', 'maintenance_mileage',
+      'insurance_fee', 'fuel_capacity', 'fuel_type', 'is_active'
+    ]);
+
+    const numericFields = ['year', 'seats', 'fuel_capacity', 'price_per_hour', 'price_per_day', 'insurance_fee', 'mileage', 'maintenance_mileage'];
+
+    for (const [kRaw, v] of Object.entries(req.body || {})) {
+      const k = String(kRaw);
       if (v === '' || typeof v === 'undefined' || v === null) continue;
+      if (nonColumnKeys.has(k)) continue; // 🚫 nunca al patch
+
+      // Sólo columnas válidas
+      if (!allowedColumns.has(k)) continue;
+
       if (numericFields.includes(k)) patch[k] = Number(v);
       else if (k === 'is_active') patch[k] = String(v).toLowerCase() === 'true';
       else patch[k] = v;
     }
 
+    // Flags / parámetros de imágenes (no-columna)
     const makePrimary = String(req.body.make_primary || '').toLowerCase() === 'true';
     const primaryImageId = req.body.primary_image_id ? Number(req.body.primary_image_id) : null;
-    const deleteImageIds = (req.body.delete_image_ids || '')
-      .split(',')
-      .map(s => s.trim())
-      .filter(Boolean)
-      .map(n => Number(n))
-      .filter(n => Number.isInteger(n));
+
+    // Aceptar ambas variantes de borrado
+    let deleteImageIds;
+    if (typeof req.body.delete_image_ids === 'string') {
+      deleteImageIds = req.body.delete_image_ids
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .map(Number)
+        .filter(Number.isInteger);
+    } else {
+      // FormData arrays: remove_images[] o remove_images
+      const arrA = req.body['remove_images[]'];
+      const arrB = req.body['remove_images'];
+      const arr = Array.isArray(arrA) ? arrA : (Array.isArray(arrB) ? arrB : []);
+      deleteImageIds = arr
+        .map(s => Number(s))
+        .filter(Number.isInteger);
+    }
+
     const newImageUrls = (req.files || []).map(f => buildPublicUrl(req, `uploads/vehicles/${f.filename}`));
 
     const isActiveWasExplicitlyProvided = Object.prototype.hasOwnProperty.call(patch, 'is_active');
