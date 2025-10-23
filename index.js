@@ -33,8 +33,6 @@ app.use(cors({
   credentials: true, // <- solo si usas cookies; con Bearer no es necesario
 }));
 
-app.options('*', cors());
-
 app.use(express.json());
 
 app.use('/api/auth/', authRoutes);
