@@ -35,7 +35,7 @@ const reportRoutes = express.Router();
  *       - in: query
  *         name: statuses
  *         schema: { type: string }
- *         description: CSV de estados (ej: "pending,confirmed,active,completed")
+ *         description: 'CSV de estados (ej: "pending,confirmed,active,completed")'
  *       - in: query
  *         name: format
  *         schema: { type: string, enum: [json, xlsx, pdf] }

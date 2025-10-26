@@ -3,8 +3,20 @@ import logger from '../utils/logger.js';
 
 const LOG_LABEL = 'ReportService';
 
+function safePreview(obj, maxLen = 1500) {
+  try {
+    const s = JSON.stringify(obj);
+    return s.length > maxLen ? `${s.slice(0, maxLen)}… (truncado)` : s;
+  } catch {
+    return '[unserializable]';
+  }
+}
+
 /** Reporte de estados: groups = [{status, count, reservations:[...]}], aggregates = {byStatus:{...}} */
 export async function reservationStatusReportQuery({from, to, statuses}) {
+  logger.info('➡️ Ingresa a reservationStatusReportQuery', {label: LOG_LABEL});
+  logger.info(`📝 Parámetros | from: ${from} | to: ${to} | statuses: ${safePreview(statuses)}`, {label: LOG_LABEL});
+
   const params = [];
   const where = [];
   if (from) {
@@ -40,7 +52,10 @@ export async function reservationStatusReportQuery({from, to, statuses}) {
       GROUP BY r.id, customer_name, r.start_at
       ORDER BY r.start_at DESC
   `;
+
+  logger.info(`🧮 Ejecutando query reservationStatusReportQuery | params: ${safePreview(params)}`, {label: LOG_LABEL});
   const {rows} = await pool.query(sql, params);
+  logger.info(`✅ Filas obtenidas: ${rows.length}`, {label: LOG_LABEL});
 
   // Agrupar por status
   const groupsMap = new Map();
@@ -55,12 +70,15 @@ export async function reservationStatusReportQuery({from, to, statuses}) {
     byStatus: Object.fromEntries(groups.map(g => [g.status, g.count])),
     totalReservations: rows.length
   };
-  logger.info('reservationStatusReportQuery', {label: LOG_LABEL, total: rows.length});
+  logger.info(`📊 Aggregates: ${safePreview(aggregates)}`, {label: LOG_LABEL});
   return {aggregates, groups};
 }
 
 /** Reporte de ingresos mensuales: aggregates (serie 12 meses) + groups por mes con reservas completas */
 export async function monthlyRevenueReportQuery({year, statuses = ['completed']}) {
+  logger.info('➡️ Ingresa a monthlyRevenueReportQuery', {label: LOG_LABEL});
+  logger.info(`📝 Parámetros | year: ${year} | statuses: ${safePreview(statuses)}`, {label: LOG_LABEL});
+
   const params = [];
   const where = [];
   if (year) {
@@ -85,19 +103,26 @@ export async function monthlyRevenueReportQuery({year, statuses = ['completed']}
       GROUP BY month
       ORDER BY month ASC
   `;
-  const {rows} = await pool.query(sql, params);
 
-  // Serie para gráficos
+  logger.info(`🧮 Ejecutando query monthlyRevenueReportQuery | params: ${safePreview(params)}`, {label: LOG_LABEL});
+  const {rows} = await pool.query(sql, params);
+  logger.info(`✅ Meses obtenidos: ${rows.length}`, {label: LOG_LABEL});
+
   const series = rows.map(r => ({
     month: r.month, revenue: Number(r.revenue)
   }));
   const totalRevenue = rows.reduce((acc, r) => acc + Number(r.revenue || 0), 0);
-  logger.info('monthlyRevenueReportQuery', {label: LOG_LABEL, months: rows.length, totalRevenue});
-  return {aggregates: {series, totalRevenue}, groups: rows};
+
+  const result = {aggregates: {series, totalRevenue}, groups: rows};
+  logger.info(`📊 Aggregates: ${safePreview(result.aggregates)}`, {label: LOG_LABEL});
+  return result;
 }
 
 /** Mantenimiento próximo: vehículos cuyo (maintenance_mileage - mileage) <= thresholdKm */
 export async function upcomingMaintenanceReportQuery({thresholdKm = 1000}) {
+  logger.info('➡️ Ingresa a upcomingMaintenanceReportQuery', {label: LOG_LABEL});
+  logger.info(`📝 Parámetros | thresholdKm: ${thresholdKm}`, {label: LOG_LABEL});
+
   const sql = `
       SELECT v.id,
              b.name                              AS brand,
@@ -116,21 +141,28 @@ export async function upcomingMaintenanceReportQuery({thresholdKm = 1000}) {
         AND (v.maintenance_mileage - v.mileage) <= $1
       ORDER BY km_remaining NULLS LAST, v.updated_at DESC
   `;
-  const {rows} = await pool.query(sql, [thresholdKm]);
+  const params = [thresholdKm];
 
-  // Buckets para tablero
+  logger.info(`🧮 Ejecutando query upcomingMaintenanceReportQuery | params: ${safePreview(params)}`, {label: LOG_LABEL});
+  const {rows} = await pool.query(sql, params);
+  logger.info(`✅ Vehículos obtenidos: ${rows.length}`, {label: LOG_LABEL});
+
   const buckets = {overdue: 0, lt_500: 0, gte_500_lt_1000: 0};
   for (const r of rows) {
     if (r.km_remaining <= 0) buckets.overdue++;
     else if (r.km_remaining < 500) buckets.lt_500++;
     else buckets.gte_500_lt_1000++;
   }
-  logger.info('upcomingMaintenanceReportQuery', {label: LOG_LABEL, total: rows.length});
-  return {aggregates: {buckets, total: rows.length}, items: rows};
+  const result = {aggregates: {buckets, total: rows.length}, items: rows};
+  logger.info(`📊 Aggregates: ${safePreview(result.aggregates)}`, {label: LOG_LABEL});
+  return result;
 }
 
 /** Clientes frecuentes: usuarios con >= N reservas completadas en rango */
 export async function frequentCustomersReportQuery({minReservations = 3, from, to}) {
+  logger.info('➡️ Ingresa a frequentCustomersReportQuery', {label: LOG_LABEL});
+  logger.info(`📝 Parámetros | minReservations: ${minReservations} | from: ${from} | to: ${to}`, {label: LOG_LABEL});
+
   const params = [minReservations];
   const where = [`r.status = 'completed'`];
 
@@ -165,18 +197,25 @@ export async function frequentCustomersReportQuery({minReservations = 3, from, t
       WHERE b.cnt >= $1
       ORDER BY b.cnt DESC, customer_name
   `;
+
+  logger.info(`🧮 Ejecutando query frequentCustomersReportQuery | params: ${safePreview(params)}`, {label: LOG_LABEL});
   const {rows} = await pool.query(sql, params);
+  logger.info(`✅ Clientes obtenidos: ${rows.length}`, {label: LOG_LABEL});
 
   const series = rows.map(r => ({user_id: r.user_id, count: Number(r.reservation_count)}));
   const totalCustomers = rows.length;
   const totalReservations = rows.reduce((acc, r) => acc + Number(r.reservation_count), 0);
 
-  logger.info('frequentCustomersReportQuery', {label: LOG_LABEL, customers: totalCustomers});
-  return {aggregates: {series, totalCustomers, totalReservations}, items: rows};
+  const result = {aggregates: {series, totalCustomers, totalReservations}, items: rows};
+  logger.info(`📊 Aggregates: ${safePreview(result.aggregates)}`, {label: LOG_LABEL});
+  return result;
 }
 
 /** Datos para contrato */
 export async function reservationContractDataQuery(reservationId) {
+  logger.info('➡️ Ingresa a reservationContractDataQuery', {label: LOG_LABEL});
+  logger.info(`📝 Parámetros | reservationId: ${reservationId}`, {label: LOG_LABEL});
+
   const sql = `
       SELECT r.id,
              r.status,
@@ -197,6 +236,14 @@ export async function reservationContractDataQuery(reservationId) {
       WHERE r.id = $1
       GROUP BY r.id, u.id, p.first_name, p.last_name, p.document_number
   `;
-  const {rows} = await pool.query(sql, [reservationId]);
+
+  const params = [reservationId];
+  logger.info(`🧮 Ejecutando query reservationContractDataQuery | params: ${safePreview(params)}`, {label: LOG_LABEL});
+  const {rows} = await pool.query(sql, params);
+
+  logger.info(`${rows.length > 0
+    ? `✅ Datos de contrato encontrados: ${safePreview(rows[0])}`
+    : '⚠️ No se encontraron datos de contrato para la reserva.'}`, {label: LOG_LABEL});
+
   return rows[0] || null;
 }
