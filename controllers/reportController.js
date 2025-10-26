@@ -26,7 +26,7 @@ function sendMaybeExport(req, res, payload, nameBase) {
 
   if (format === 'xlsx') {
     logger.info(`📦 Generando XLSX (payload preview): ${safePreview(payload)}`, {label: LOG_LABEL});
-    return buildXlsxBuffer(payload).then(buf => {
+    return buildXlsxBuffer(payload, nameBase).then(buf => {
       res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
       res.setHeader('Content-Disposition', `attachment; filename="${nameBase}.xlsx"`);
       logger.info(`✅ XLSX generado (${buf?.length || 0} bytes)`, {label: LOG_LABEL});
@@ -153,7 +153,7 @@ export async function generateReservationContract(req, res) {
 
     const buf = await buildContractPdfBuffer(data);
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `inline; filename="contract-${reservationId}.pdf"`);
+    res.setHeader('Content-Disposition', `inline; filename="contrato-reserva-${reservationId}.pdf"`);
     logger.info(`✅ Contrato PDF generado (${buf?.length || 0} bytes)`, {label: LOG_LABEL});
     return res.status(200).send(buf);
   } catch (err) {

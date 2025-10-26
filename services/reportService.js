@@ -217,20 +217,34 @@ export async function reservationContractDataQuery(reservationId) {
   logger.info(`📝 Parámetros | reservationId: ${reservationId}`, {label: LOG_LABEL});
 
   const sql = `
-      SELECT r.id,
-             r.status,
-             r.start_at,
-             r.end_at,
-             r.total_amount,
-             r.note,
-             u.id                                                        AS customer_user_id,
-             p.first_name,
-             p.last_name,
-             p.document_number,
-             COALESCE(jsonb_agg(jsonb_build_object('vehicle_id', ri.vehicle_id, 'line_amount', ri.line_amount)
-                               ) FILTER (WHERE ri.id IS NOT NULL), '[]') as items
+      SELECT
+          r.id,
+          r.status,
+          r.start_at,
+          r.end_at,
+          r.total_amount,
+          r.note,
+          u.id AS customer_user_id,
+          p.first_name,
+          p.last_name,
+          p.document_number,
+          COALESCE(
+                  jsonb_agg(
+                          jsonb_build_object(
+                                  'vehicle_id', ri.vehicle_id,
+                                  'line_amount', ri.line_amount,
+                                  'brand_name', vb.name,
+                                  'model', v.model,
+                                  'year', v.year,
+                                  'license_plate', v.license_plate
+                          )
+                  ) FILTER (WHERE ri.id IS NOT NULL),
+                  '[]'
+          ) AS items
       FROM reservation.reservations r
                LEFT JOIN reservation.reservation_items ri ON ri.reservation_id = r.id
+               LEFT JOIN vehicle.vehicles v ON v.id = ri.vehicle_id
+               LEFT JOIN vehicle.vehicle_brands vb ON vb.id = v.brand_id
                JOIN "user".users u ON u.id = r.customer_user_id
                JOIN person.persons p ON p.id = u.person_id
       WHERE r.id = $1
