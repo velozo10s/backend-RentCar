@@ -24,6 +24,12 @@ function sendMaybeExport(req, res, payload, nameBase) {
   const format = (req.query.format || 'json').toLowerCase();
   logger.info(`🧾 Formato solicitado: ${format} | nombre base: ${nameBase}`, {label: LOG_LABEL});
 
+  const pdfOptions = {
+    orientation: (req.query.orientation || 'portrait').toLowerCase(), // 'portrait' | 'landscape'
+    compact: String(req.query.compact || 'false').toLowerCase() === 'true',
+    fontSize: Number(req.query.fontSize || 9) // opcional, por si querés forzar tamaño
+  };
+
   if (format === 'xlsx') {
     logger.info(`📦 Generando XLSX (payload preview): ${safePreview(payload)}`, {label: LOG_LABEL});
     return buildXlsxBuffer(payload, nameBase).then(buf => {
@@ -34,11 +40,10 @@ function sendMaybeExport(req, res, payload, nameBase) {
     });
   }
   if (format === 'pdf') {
-    logger.info(`📄 Generando PDF simple (payload preview): ${safePreview(payload)}`, {label: LOG_LABEL});
-    return buildSimplePdfBuffer(payload, nameBase).then(buf => {
+    logger.info(`📄 Generando PDF (${pdfOptions.orientation}, compact=${pdfOptions.compact})`, {label: LOG_LABEL});
+    return buildSimplePdfBuffer(payload, nameBase, pdfOptions).then(buf => {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader('Content-Disposition', `inline; filename="${nameBase}.pdf"`);
-      logger.info(`✅ PDF generado (${buf?.length || 0} bytes)`, {label: LOG_LABEL});
       return res.status(200).send(buf);
     });
   }
