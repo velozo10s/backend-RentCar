@@ -1,5 +1,9 @@
 import ExcelJS from 'exceljs';
 import PDFDocument from 'pdfkit';
+import dotenv from 'dotenv';
+import QRCode from 'qrcode';
+
+dotenv.config();
 
 /** =========================
  * Helpers comunes (XLSX)
@@ -663,7 +667,6 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
   });
 }
 
-/** Contrato PDF (se mantiene igual) */
 export async function buildContractPdfBuffer(data) {
   const {
     COMPANY_NAME = 'Tu Empresa S.A.',
@@ -672,233 +675,379 @@ export async function buildContractPdfBuffer(data) {
     COMPANY_PHONE = '+595 000 000 000',
     COMPANY_EMAIL = 'info@tuempresa.com',
     COMPANY_WEBSITE = 'https://tuempresa.com',
-    COMPANY_LOGO_PATH, // opcional: ruta local a una imagen .png/.jpg
+    COMPANY_LOGO_PATH,
   } = process.env;
 
-  const doc = new PDFDocument({size: 'A4', margin: 50, bufferPages: true});
-  const chunks = [];
+  // --------- Normalizadores ---------
+  const pick = (...vals) => vals.find(v => v !== undefined && v !== null && v !== '') ?? null;
 
-  // Helpers
+  const reservationId = pick(data?.id, data?.reservation_id, data?.code);
+  const reservationStatus = pick(data?.status, data?.state, data?.reservation_status);
+  const startAt = pick(data?.start_at, data?.start, data?.from, data?.pickup_at);
+  const endAt = pick(data?.end_at, data?.end, data?.to, data?.return_at);
+  const totalAmount = Number(pick(data?.total_amount, data?.total, data?.amount_total, data?.grand_total, 0));
+  const note = pick(data?.note, data?.notes, data?.comment);
+
+  const customer = data?.customer || data?.client || data?.customer_user || {};
+  const firstName = pick(data?.first_name, customer?.first_name, data?.customer_first_name);
+  const lastName = pick(data?.last_name, customer?.last_name, data?.customer_last_name);
+  const fullName = [firstName, lastName].filter(Boolean).join(' ') || pick(customer?.name, data?.customer_name, '—');
+  const documentNumber = pick(data?.document_number, customer?.document_number, data?.document, data?.dni, '—');
+  const phone = pick(data?.phone, customer?.phone, data?.customer_phone);
+  const email = pick(data?.email, customer?.email, data?.customer_email);
+
+  const rawItems = Array.isArray(data?.items)
+    ? data.items
+    : Array.isArray(data?.vehicles)
+      ? data.vehicles
+      : [];
+  const items = rawItems.map((it) => ({
+    vehicle_id: pick(it.vehicle_id, it.id, '—'),
+    brand_name: pick(it.brand_name, it.brand, ''),
+    model: pick(it.model, it.model_name, '(sin detalle)'),
+    license_plate: pick(it.license_plate, it.plate, '—'),
+    year: pick(it.year, it.model_year, '—'),
+    line_amount: Number(pick(it.line_amount, it.amount, it.price, 0)),
+  }));
+  const subtotal = items.reduce((a, b) => a + Number(b.line_amount || 0), 0);
+
+  // --------- PDF base ---------
+  const doc = new PDFDocument({size: 'A4', margin: 46, bufferPages: true});
+  const chunks = [];
+  const PALETTE = {
+    primary: '#0F6CBD',
+    primarySoft: '#E8F1FB',
+    border: '#D9DFE7',
+    text: '#111',
+    textMuted: '#666',
+    zebra: '#FAFBFD',
+  };
+  const SP = {xs: 4, sm: 8, md: 12, lg: 18, xl: 26};
+
   const fmtCurrency = (n) =>
     new Intl.NumberFormat('es-PY', {
       style: 'currency',
-      currency: 'PYG',
+      currency: 'USD',
       maximumFractionDigits: 0
     }).format(Number(n || 0));
 
   const fmtDateTime = (dt) => {
-    // dt puede venir como string ISO o Date; mostramos fecha y hora local “es-PY”
+    if (!dt) return '—';
     const d = new Date(dt);
-    const fFecha = new Intl.DateTimeFormat('es-PY', {year: 'numeric', month: '2-digit', day: '2-digit'}).format(d);
+    const fFecha = new Intl.DateTimeFormat('es-PY', {day: '2-digit', month: '2-digit', year: 'numeric'}).format(d);
     const fHora = new Intl.DateTimeFormat('es-PY', {hour: '2-digit', minute: '2-digit'}).format(d);
     return `${fFecha} ${fHora}`;
   };
 
-  const drawHr = (y = doc.y + 6) => {
-    doc.moveTo(doc.page.margins.left, y).lineTo(doc.page.width - doc.page.margins.right, y).strokeColor('#CCCCCC').lineWidth(1).stroke().fillColor('black');
-    doc.moveDown(0.3);
+  const hr = (y = doc.y, color = PALETTE.border) => {
+    doc.save()
+      .moveTo(doc.page.margins.left, y)
+      .lineTo(doc.page.width - doc.page.margins.right, y)
+      .lineWidth(1).strokeColor(color).stroke()
+      .restore();
+    doc.moveDown(0.5);
   };
 
-  const addFooter = () => {
-    const range = doc.bufferedPageRange(); // { start: 0, count: N }
-    for (let i = range.start; i < range.start + range.count; i++) {
-      doc.switchToPage(i);
-      const pageNum = i + 1;
-      const total = range.count;
-      const footerY = doc.page.height - 40;
-      doc.fontSize(8).fillColor('#555');
-      doc.text(`${COMPANY_NAME} · ${COMPANY_ADDRESS} · ${COMPANY_PHONE} · ${COMPANY_EMAIL}`, doc.page.margins.left, footerY, {
-        align: 'center',
-        width: doc.page.width - doc.page.margins.left - doc.page.margins.right
+  const roundedRect = (x, y, w, h, r = 6, fill = null, stroke = PALETTE.border) => {
+    doc.save();
+    doc.lineWidth(1).roundedRect(x, y, w, h, r);
+    if (fill) doc.fillColor(fill).fill();
+    if (stroke) doc.lineWidth(1).strokeColor(stroke).roundedRect(x, y, w, h, r).stroke();
+    doc.restore();
+  };
+
+  const drawHeaderBand = () => {
+    const bandH = 60;
+    const w = doc.page.width;
+    doc.save().rect(0, 0, w, bandH).fill(PALETTE.primary).restore();
+
+    const logoY = 14;
+    if (COMPANY_LOGO_PATH) {
+      try {
+        doc.image(COMPANY_LOGO_PATH, doc.page.margins.left, logoY, {height: 32});
+      } catch {
+      }
+    } else {
+      doc.fillColor('#fff').font('Helvetica-Bold').fontSize(12).text(COMPANY_NAME, doc.page.margins.left, logoY + 8);
+    }
+    doc.fillColor('#fff').font('Helvetica-Bold').fontSize(16)
+      .text('CONTRATO DE ALQUILER DE VEHÍCULO', 0, logoY + 6, {
+        align: 'right',
+        width: w - doc.page.margins.left - doc.page.margins.right
       });
-      doc.text(`Página ${pageNum} de ${total}`, doc.page.margins.left, footerY + 12, {
-        align: 'center',
-        width: doc.page.width - doc.page.margins.left - doc.page.margins.right
-      });
-      doc.fillColor('black');
+    doc.fillColor(PALETTE.text);
+    doc.y = bandH + SP.md;
+  };
+
+  const ensureSpace = (needed = 80) => {
+    if (doc.y + needed > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      drawHeaderBand();
     }
   };
 
-  // QR opcional
-  const maybeDrawQR = async () => {
-    if (!data?.reservation_url) return;
-    try {
-      const qrPng = await QRCode.toBuffer(data.reservation_url, {margin: 1, scale: 4});
-      doc.image(qrPng, doc.page.width - doc.page.margins.right - 90, 60, {width: 80});
-      doc.fontSize(8).fillColor('#555')
-        .text('Escaneá para ver la reserva', doc.page.width - doc.page.margins.right - 90, 145, {
-          width: 80,
-          align: 'center'
-        })
-        .fillColor('black');
-    } catch { /* silent */
-    }
+  // --------- Cards SIN tapar texto (miden altura antes) ---------
+  const renderInfoCard = (title, lines) => {
+    const x = doc.page.margins.left;
+    const w = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const pad = 10;
+
+    // header
+    const headerY = doc.y;
+    const headerH = 24;
+    roundedRect(x, headerY, w, headerH, 8, PALETTE.primarySoft, PALETTE.border);
+    doc.fillColor(PALETTE.text).font('Helvetica-Bold').fontSize(11)
+      .text(title, x + pad, headerY + 6);
+
+    // construir el cuerpo como string para medir
+    const bodyText = lines.join('\n');
+    const textOpts = {width: w - pad * 2, align: 'left'};
+    doc.font('Helvetica').fontSize(10);
+    const textH = Math.max(32, doc.heightOfString(bodyText, textOpts)); // altura estimada
+
+    // body (detrás)
+    const bodyY = headerY + headerH;
+    roundedRect(x, bodyY, w, textH + pad * 1.2, 8, '#fff', PALETTE.border);
+
+    // texto (encima del body)
+    doc.fillColor(PALETTE.text).font('Helvetica').fontSize(10)
+      .text(bodyText, x + pad, bodyY + pad / 1.2, textOpts);
+
+    // mover cursor
+    doc.y = bodyY + textH + pad * 1.2 + SP.md;
+    doc.fillColor(PALETTE.text);
   };
 
+  // --------- Tabla con y-base por fila ---------
+  const drawTable = ({headers, rows, colWidths, aligns}) => {
+    const x0 = doc.page.margins.left;
+    const xMax = doc.page.width - doc.page.margins.right;
+    const rowH = 18;
+    const padX = 6;
+
+    const header = () => {
+      const y0 = doc.y;
+      doc.save();
+      doc.rect(x0, y0, xMax - x0, rowH).fill(PALETTE.primarySoft).restore();
+      doc.lineWidth(1).strokeColor(PALETTE.border).moveTo(x0, y0 + rowH).lineTo(xMax, y0 + rowH).stroke();
+      let x = x0;
+      headers.forEach((h, i) => {
+        const w = colWidths[i];
+        doc.font('Helvetica-Bold').fontSize(9).fillColor(PALETTE.text)
+          .text(h, x + padX, y0 + 4, {width: w - padX * 2, align: aligns[i] || 'left'});
+        x += w;
+      });
+      doc.y = y0 + rowH;
+    };
+
+    const row = (cells, zebra) => {
+      const y0 = doc.y;
+      if (zebra) {
+        doc.save();
+        doc.rect(x0, y0, xMax - x0, rowH).fill(PALETTE.zebra).restore();
+      }
+      let x = x0;
+      cells.forEach((c, i) => {
+        const w = colWidths[i];
+        doc.font('Helvetica').fontSize(9).fillColor(PALETTE.text)
+          .text(String(c ?? ''), x + padX, y0 + 4, {width: w - padX * 2, align: aligns[i] || 'left'});
+        x += w;
+      });
+      doc.save().lineWidth(0.5).strokeColor(PALETTE.border).moveTo(x0, y0 + rowH).lineTo(xMax, y0 + rowH).stroke().restore();
+      doc.y = y0 + rowH;
+    };
+
+    header();
+    rows.forEach((r, idx) => {
+      ensureSpace(rowH * 2);
+      if (doc.y + rowH > doc.page.height - doc.page.margins.bottom) {
+        doc.addPage();
+        drawHeaderBand();
+        header();
+      }
+      row(r, idx % 2 === 1);
+    });
+  };
+
+  // --------- Firmas absolutas ---------
+  const drawSignature = (x, y, w, title, subtitle) => {
+    doc.save().strokeColor('#000').moveTo(x, y).lineTo(x + w, y).stroke().restore();
+    doc.fillColor(PALETTE.text).fontSize(10).text(title, x, y + 6, {width: w, align: 'center'});
+    doc.fillColor(PALETTE.text).fontSize(9).text(subtitle || '', x, y + 20, {width: w, align: 'center'});
+  };
+
+  // const addFooter = () => {
+  //   const range = doc.bufferedPageRange();
+  //   for (let i = range.start; i < range.start + range.count; i++) {
+  //     doc.switchToPage(i);
+  //     const y = doc.page.height - 34;
+  //     const w = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  //     doc.fontSize(8).fillColor(PALETTE.textMuted);
+  //     doc.text(`${COMPANY_NAME} · ${COMPANY_ADDRESS} · ${COMPANY_PHONE} · ${COMPANY_EMAIL}`, doc.page.margins.left, y, {
+  //       width: w,
+  //       align: 'center'
+  //     });
+  //     doc.text(`Página ${i + 1} de ${range.count}`, doc.page.margins.left, y + 10, {width: w, align: 'center'});
+  //   }
+  //   doc.fillColor(PALETTE.text);
+  // };
+
+  // --------- Stream ---------
   return await new Promise(async (resolve, reject) => {
-    doc.on('data', (c) => chunks.push(c));
+    doc.on('data', c => chunks.push(c));
     doc.on('end', () => resolve(Buffer.concat(chunks)));
     doc.on('error', reject);
 
-    // ENCABEZADO
-    if (COMPANY_LOGO_PATH) {
+    drawHeaderBand();
+
+    // QR (opcional)
+    if (data?.reservation_url) {
       try {
-        doc.image(COMPANY_LOGO_PATH, doc.page.margins.left, 40, {width: 120});
-      } catch { /* si falla el logo, seguimos sin cortar */
+        const qr = await QRCode.toBuffer(data.reservation_url, {margin: 0, scale: 4});
+        const rightX = doc.page.width - doc.page.margins.right - 120;
+        doc.image(qr, rightX, doc.y, {width: 110});
+        doc.fontSize(8).fillColor(PALETTE.textMuted)
+          .text('Escaneá para ver la reserva', rightX, doc.y + 92, {width: 110, align: 'center'})
+          .fillColor(PALETTE.text);
+      } catch {
       }
     }
-
-    doc.font('Helvetica-Bold').fontSize(18).text('CONTRATO DE ALQUILER DE VEHÍCULO', 0, 40, {
-      align: 'right'
-    });
-
-    doc.moveDown(1.8);
-    drawHr();
-
-    // INFO EMPRESA
-    doc.fontSize(10).font('Helvetica');
-    doc.text(`${COMPANY_NAME}`, {continued: false});
-    doc.text(`${COMPANY_RUC}`);
-    doc.text(`${COMPANY_ADDRESS}`);
-    doc.text(`Tel: ${COMPANY_PHONE} · Email: ${COMPANY_EMAIL}`);
-    if (COMPANY_WEBSITE) doc.text(`${COMPANY_WEBSITE}`);
-    doc.moveDown(0.5);
-
-    await maybeDrawQR();
-
-    drawHr();
-
-    // DATOS DE LA RESERVA Y CLIENTE
-    const label = (t) => doc.font('Helvetica-Bold').text(t, {continued: true}).font('Helvetica');
-
-    doc.fontSize(12);
-    label('Nº de Reserva: ');
-    doc.text(`${data.id}`);
-    label('Estado: ');
-    doc.text(`${data.status}`);
-    label('Período: ');
-    doc.text(`${fmtDateTime(data.start_at)} a ${fmtDateTime(data.end_at)}`);
-    label('Total del Contrato: ');
-    doc.text(`${fmtCurrency(data.total_amount)}`);
-    if (data.note) {
-      label('Notas: ');
-      doc.text(`${data.note}`);
-    }
-    doc.moveDown(0.5);
-
-    label('Cliente: ');
-    doc.text(`${data.first_name} ${data.last_name}`);
-    label('Documento: ');
-    doc.text(`${data.document_number}`);
-    drawHr();
-
-    // TABLA DE VEHÍCULOS
-    doc.font('Helvetica-Bold').fontSize(12).text('Vehículos incluidos', {align: 'left'});
-    doc.moveDown(0.3);
-
-    const table = {
-      x: doc.page.margins.left,
-      y: doc.y,
-      colWidths: [55, 165, 80, 80, 90], // ID, Modelo, Patente, Año, Importe
-      headers: ['ID', 'Modelo', 'Patente', 'Año', 'Importe'],
-    };
-
-    const drawRow = (cells, bold = false) => {
-      const y = doc.y;
-      const fonts = bold ? 'Helvetica-Bold' : 'Helvetica';
-      doc.font(fonts).fontSize(10);
-      let x = table.x;
-      for (let i = 0; i < cells.length; i++) {
-        const w = table.colWidths[i];
-        doc.text(String(cells[i] ?? ''), x + 2, y, {width: w - 4, continued: false});
-        x += w;
-      }
-      doc.moveDown(0.6);
-      // salto de página si hace falta
-      if (doc.y > doc.page.height - 120) doc.addPage();
-    };
-
-    // Header
-    drawRow(table.headers, true);
-    drawHr();
-
-    // Body
-    const items = Array.isArray(data.items) ? data.items : [];
-    items.forEach((it) => {
-      drawRow([
-        it.vehicle_id ?? '',
-        it.model ? `${it.brand_name ?? ''} ${it.model}`.trim() : '(sin detalle)',
-        it.license_plate ?? '—',
-        it.year ?? '—',
-        fmtCurrency(it.line_amount),
-      ]);
-    });
-
-    drawHr();
-
-    // Resumen económico
-    doc.font('Helvetica-Bold').fontSize(11).text('Resumen económico', {align: 'left'});
-    doc.moveDown(0.2);
-    doc.font('Helvetica').fontSize(10);
-    doc.text(`Subtotal: ${fmtCurrency(items.reduce((a, b) => a + Number(b.line_amount || 0), 0))}`);
-    // acá podrías sumar: seguro, depósito, descuentos, impuestos, etc.
-    doc.text(`Total: ${fmtCurrency(data.total_amount)}`);
-    drawHr();
-
-    // TÉRMINOS Y CONDICIONES
-    doc.font('Helvetica-Bold').fontSize(12).text('Términos y Condiciones', {align: 'left'});
-    doc.moveDown(0.2);
-    doc.font('Helvetica').fontSize(9).list([
-      'Requisitos del conductor: El arrendatario declara ser mayor de 18 años, poseer licencia de conducir vigente y válida en el territorio, y presentar documento de identidad.',
-      'Uso del vehículo: El vehículo debe utilizarse conforme a la ley y al manual del fabricante. Queda prohibido su uso para carreras, remolques no autorizados, transporte de carga peligrosa o subarriendo.',
-      'Conductores adicionales: Solo podrán conducir las personas registradas y autorizadas por la empresa. El arrendatario responde por su conducta.',
-      'Kilometraje y combustible: El vehículo se entrega con odómetro funcional y nivel de combustible indicado en el acta de entrega. La devolución deberá realizarse con el mismo nivel; de lo contrario, se cobrará la reposición más un cargo de servicio.',
-      'Mantenimiento y averías: El arrendatario debe verificar periódicamente niveles básicos (aceite, refrigerante, presión de neumáticos). Ante luces de advertencia o ruidos anormales, debe detener el uso y contactar a la empresa.',
-      'Accidentes y siniestros: En caso de incidente, el arrendatario debe dar aviso inmediato a la empresa y a las autoridades, completar el parte policial y cooperar con la aseguradora. No debe aceptar responsabilidades ni acuerdos sin autorización.',
-      'Multas, peajes y sanciones: Son a cargo del arrendatario durante el período de alquiler, aun si se notifican con posterioridad. La empresa podrá cargar estos importes y gastos administrativos al medio de pago registrado.',
-      'Seguro y deducible: El vehículo cuenta con cobertura de seguro conforme a la póliza vigente. El arrendatario será responsable del deducible, exclusiones y cualquier daño no cubierto por la póliza o por uso indebido.',
-      'Daños, pérdidas y limpieza: Se cobrará por daños, faltantes de accesorios, limpieza extraordinaria (incluye olores fuertes, barro excesivo, mascotas sin protección) y/o desinfección si corresponde.',
-      'Retrasos en la devolución: Se aplicará cargo por hora o día adicional según tarifas vigentes si se excede el horario pactado. Retrasos mayores a 2 horas pueden computarse como día adicional completo.',
-      'Devolución anticipada y cancelaciones: La devolución anticipada no garantiza reembolso por días no utilizados. Las cancelaciones/no-show se regirán por la política vigente al momento de la reserva.',
-      'Acta de entrega y devolución: Las condiciones estéticas, nivel de combustible, km y accesorios se documentarán en el formulario/acta, que forma parte integrante de este contrato.',
-      'Manejo en fronteras: Salir del país sin autorización escrita de la empresa está prohibido y anula la cobertura del seguro.',
-      'Rastreo y telemetría: El vehículo puede contar con GPS/telemetría para seguridad y cumplimiento. El arrendatario lo consiente y autoriza su uso.',
-      'Pago y garantía: El arrendatario autoriza a la empresa a realizar cargos en la tarjeta/medio de pago provisto por el alquiler, depósito de garantía, deducible del seguro, multas, peajes, reposiciones y otros cargos derivados del contrato.',
-      'Incumplimiento: El uso ilícito, falsedad de datos, o mora en el pago habilita a la empresa a retirar el vehículo sin previo aviso y a reclamar daños y perjuicios.',
-      'Jurisdicción y ley aplicable: Este contrato se rige por las leyes del país de la sede de la empresa. Cualquier controversia se somete a los tribunales competentes de dicha jurisdicción.',
-      'Datos personales: El arrendatario autoriza el tratamiento de sus datos conforme a la política de privacidad disponible en el sitio web de la empresa.',
-      'Vigencia: Este contrato entra en vigor con la firma de las partes y rige durante el período de alquiler indicado.',
-    ], {bulletRadius: 1.5});
-
-    doc.moveDown(0.5);
-    doc.fontSize(8).fillColor('#666').text('Este documento es un modelo estándar y puede requerir adecuaciones legales específicas para su negocio.', {align: 'left'}).fillColor('black');
-
-    drawHr();
-
-    // FIRMAS
-    doc.moveDown(1);
-    const sigY = doc.y + 40;
-    const colW = (doc.page.width - doc.page.margins.left - doc.page.margins.right) / 2;
-
-    // Cliente
-    doc.moveTo(doc.page.margins.left + 10, sigY).lineTo(doc.page.margins.left + colW - 10, sigY).strokeColor('#000').lineWidth(1).stroke().fillColor('black');
-    doc.fontSize(10).text('Firma del Cliente', doc.page.margins.left + 10, sigY + 5, {
-      width: colW - 20,
-      align: 'center'
-    });
-    doc.fontSize(9).text(`${data.first_name} ${data.last_name} · Doc: ${data.document_number}`, {
-      width: colW - 20,
-      align: 'center'
-    });
 
     // Empresa
-    const rightX = doc.page.margins.left + colW + 10;
-    doc.moveTo(rightX, sigY).lineTo(doc.page.width - doc.page.margins.right - 10, sigY).stroke();
-    doc.fontSize(10).text('Firma y Sello de la Empresa', rightX, sigY + 5, {width: colW - 20, align: 'center'});
-    doc.fontSize(9).text(`${COMPANY_NAME} · ${COMPANY_RUC}`, rightX, undefined, {width: colW - 20, align: 'center'});
+    const compY = doc.y;
+    doc.font('Helvetica').fontSize(9).fillColor(PALETTE.text);
+    doc.text(COMPANY_NAME, doc.page.margins.left, compY);
+    doc.text(COMPANY_RUC);
+    doc.text(COMPANY_ADDRESS);
+    doc.text(`Tel: ${COMPANY_PHONE} · ${COMPANY_EMAIL}`);
+    if (COMPANY_WEBSITE) doc.text(COMPANY_WEBSITE);
+    doc.moveDown();
+    hr();
 
-    // Cierre
-    addFooter();
+    const STATUS_MAP_ES = {
+      pending: 'Pendiente',
+      confirmed: 'Confirmado',
+      active: 'Activa',
+      completed: 'Finalizada',
+      declined: 'Rechazada',
+      cancelled: 'Cancelada',
+    };
+    const capitalize = (s = '') => s.charAt(0).toUpperCase() + s.slice(1);
+    const formatReservationStatus = (val) => {
+      if (!val) return '—';
+      const key = String(val).toLowerCase().trim();
+      // Si viene con underscores, los hacemos espacio para fallback legible
+      return STATUS_MAP_ES[key] ?? capitalize(key.replace(/_/g, ' '));
+    };
+
+    // ---- Cards (ahora visibles) ----
+    renderInfoCard('Datos de la Reserva', [
+      `Nº de Reserva: ${String(reservationId ?? '—')}`,
+      `Estado: ${formatReservationStatus(reservationStatus)}`,
+      `Período: ${fmtDateTime(startAt)} a ${fmtDateTime(endAt)}`,
+      `Total del Contrato: ${fmtCurrency(totalAmount || subtotal)}`,
+      ...(note ? [`Notas: ${String(note)}`] : []),
+    ]);
+
+    renderInfoCard('Datos del Cliente', [
+      `Cliente: ${fullName}`,
+      `Documento: ${String(documentNumber)}`,
+      ...(phone ? [`Teléfono: ${String(phone)}`] : []),
+      ...(email ? [`Email: ${String(email)}`] : []),
+    ]);
+
+    // ---- Tabla ----
+    doc.font('Helvetica-Bold').fontSize(12).fillColor(PALETTE.text).text('Vehículos incluidos');
+    doc.moveDown(0.4);
+
+    drawTable({
+      headers: ['ID', 'Modelo', 'Patente', 'Año', 'Importe'],
+      colWidths: [55, 200, 90, 60, 90],
+      aligns: ['left', 'left', 'left', 'center', 'right'],
+      rows: (items.length ? items : [{
+        vehicle_id: '—', model: '—', license_plate: '—', year: '—', line_amount: 0
+      }]).map(it => ([
+        it.vehicle_id,
+        it.model ? `${it.brand_name ? it.brand_name + ' ' : ''}${it.model}` : '(sin detalle)',
+        it.license_plate,
+        it.year,
+        fmtCurrency(it.line_amount),
+      ])),
+    });
+
+    doc.moveDown(0.5);
+
+    // ---- Resumen económico ----
+    const bx = doc.page.margins.left;
+    const bw = 260;
+    const by = doc.y;
+    roundedRect(bx, by, bw, 60, 8, '#fff', PALETTE.border);
+    doc.font('Helvetica-Bold').fontSize(11).fillColor(PALETTE.text).text('Resumen económico', bx + 10, by + 8);
+    doc.font('Helvetica').fontSize(10).fillColor(PALETTE.text)
+      .text(`Subtotal: ${fmtCurrency(subtotal)}`, bx + 10, by + 28)
+      .text(`Total: ${fmtCurrency(totalAmount || subtotal)}`, bx + 10, by + 44);
+
+    doc.moveDown(2);
+
+    // ---- TyC ----
+    doc.font('Helvetica-Bold').fontSize(12).fillColor(PALETTE.text).text('Términos y Condiciones');
+    doc.moveDown(0.2);
+    doc.font('Helvetica').fontSize(9).fillColor(PALETTE.text).list([
+      'Requisitos del conductor: El arrendatario declara ser mayor de 18 años y poseer licencia vigente.',
+      'Uso del vehículo: Conforme a ley y manual. Prohibido carreras, remolques no autorizados, cargas peligrosas o subarriendo.',
+      'Conductores adicionales: Solo personas registradas y autorizadas por la empresa.',
+      'Kilometraje y combustible: Devolución con el mismo nivel indicado; se cobrará reposición si corresponde.',
+      'Mantenimiento y averías: Verificar niveles básicos; ante alertas, detener uso y contactar a la empresa.',
+      'Accidentes y siniestros: Aviso inmediato, parte policial y cooperación con aseguradora.',
+      'Multas, peajes y sanciones: A cargo del arrendatario; se podrán debitar del medio de pago registrado.',
+      'Seguro y deducible: Cobertura según póliza; deducible y exclusiones a cargo del arrendatario.',
+      'Daños, pérdidas y limpieza: Se cobrará por daños, faltantes y limpieza extraordinaria.',
+      'Retrasos en la devolución: Cargo por hora o día adicional según tarifas vigentes.',
+      'Devolución anticipada/cancelaciones: Sujetos a la política vigente.',
+      'Acta de entrega y devolución: Forma parte integrante del contrato.',
+      'Fronteras: Prohibido salir del país sin autorización escrita.',
+      'Rastreo y telemetría: Puede incluirse por seguridad y cumplimiento.',
+      'Pago y garantía: Autorización de cargos por alquiler, depósito, deducible, multas y reposiciones.',
+      'Incumplimiento: Habilita retiro del vehículo y reclamo de daños.',
+      'Jurisdicción y ley aplicable: La del país de la sede de la empresa.',
+      'Datos personales: Tratamiento conforme a la política de privacidad publicada.',
+      'Vigencia: Desde la firma y durante el período de alquiler.',
+    ], {bulletRadius: 1.6});
+
+    // doc.moveDown(0.5);
+    // doc.fontSize(8).fillColor(PALETTE.textMuted)
+    //   .text('Este documento es un modelo estándar y puede requerir adecuaciones legales específicas para su negocio.');
+    // doc.fillColor(PALETTE.text);
+    // hr();
+
+    // ---- Firmas ----
+    const wPage = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    const colW = (wPage / 2) - 16;
+    const xL = doc.page.margins.left;
+    const xR = xL + colW + 32;
+    const ySig = doc.y + 42;
+
+    const subtitleClient = `${fullName}${documentNumber && documentNumber !== '—' ? ` · Doc: ${documentNumber}` : ''}`;
+    drawSignature(xL, ySig, colW, 'Firma del Cliente', subtitleClient);
+    drawSignature(xR, ySig, colW, 'Firma y Sello de la Empresa', `${COMPANY_NAME} · ${COMPANY_RUC}`);
+    //
+    // doc.y = ySig + 54;
+    //
+    // // Footer
+    // const range = doc.bufferedPageRange();
+    // for (let i = range.start; i < range.start + range.count; i++) {
+    //   doc.switchToPage(i);
+    //   const y = doc.page.height - 34;
+    //   const w = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+    //   doc.fontSize(8).fillColor(PALETTE.textMuted);
+    //   doc.text(`${COMPANY_NAME} · ${COMPANY_ADDRESS} · ${COMPANY_PHONE} · ${COMPANY_EMAIL}`, doc.page.margins.left, y, {
+    //     width: w,
+    //     align: 'center'
+    //   });
+    //   doc.text(`Página ${i + 1} de ${range.count}`, doc.page.margins.left, y + 10, {width: w, align: 'center'});
+    // }
+    doc.fillColor(PALETTE.text);
+
     doc.end();
   });
 }
