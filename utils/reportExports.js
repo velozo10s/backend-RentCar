@@ -21,6 +21,20 @@ const formatReservationStatus = (val) => {
   return STATUS_MAP_ES[key] ?? capitalize(key.replace(/_/g, ' '));
 };
 
+const formatBoolEs = (v) => (v ? 'Sí' : 'No');
+
+// Si también querés mapear estados de vehículos, opcional:
+const VEHICLE_STATUS_MAP_ES = {
+  available: 'Disponible',
+  unavailable: 'No disponible',
+  maintenance: 'En mantenimiento',
+  inactive: 'Inactivo',
+};
+const formatVehicleStatus = (val) => {
+  if (!val) return '—';
+  const key = String(val).toLowerCase().trim();
+  return VEHICLE_STATUS_MAP_ES[key] ?? capitalize(key.replace(/_/g, ' '));
+};
 
 /** =========================
  * Helpers comunes (XLSX)
@@ -77,7 +91,7 @@ function xlsxReservationStatus(payload) {
 
   // 1) Resumen por estado
   const summaryRows = Object.entries(payload.aggregates?.byStatus || {}).map(
-    ([estado, cantidad]) => ({estado, cantidad})
+    ([estado, cantidad]) => ({estado: formatReservationStatus(estado), cantidad})
   );
   addTableSheet(
     wb,
@@ -93,7 +107,7 @@ function xlsxReservationStatus(payload) {
   const reservas = (payload.groups || []).flatMap((g) =>
     (g.reservations || []).map((r) => ({
       id: r.id,
-      estado: r.status,
+      estado: formatReservationStatus(r.status),
       cliente: r.customer_name,
       inicio: r.start_at,
       fin: r.end_at,
@@ -165,7 +179,7 @@ function xlsxMonthlyRevenue(payload) {
       mes: g.month,
       id_reserva: r.id,
       id_cliente: r.customer_user_id,
-      estado: r.status,
+      estado: formatReservationStatus(r.status),
       inicio: r.start_at,
       fin: r.end_at,
       total: Number(r.total_amount),
@@ -225,7 +239,11 @@ function xlsxUpcomingMaintenance(payload) {
       {header: 'Estado', key: 'status', width: 16},
       {header: 'Activo', key: 'is_active', width: 10},
     ],
-    payload.items || []
+    (payload.items || []).map(v => ({
+      ...v,
+      status: formatVehicleStatus?.(v.status) ?? formatReservationStatus(v.status), // fallback
+      is_active: formatBoolEs(v.is_active),
+    }))
   );
 
   return wb;
@@ -516,7 +534,7 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
 
         // Resumen
         const summary = Object.entries(payload.aggregates?.byStatus || {}).map(
-          ([estado, cantidad]) => ({estado, cantidad})
+          ([estado, cantidad]) => ({estado: formatReservationStatus(estado), cantidad})
         );
         drawTableDynamic(
           doc,
@@ -535,7 +553,7 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
         const reservas = (payload.groups || []).flatMap((g) =>
           (g.reservations || []).map((r) => ({
             id: r.id,
-            estado: r.status,
+            estado: formatReservationStatus(r.status),
             cliente: r.customer_name,
             inicio: fmtDateTime(r.start_at),
             fin: fmtDateTime(r.end_at),
@@ -595,7 +613,7 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
           (g.reservations || []).map((r) => ({
             mes: fmtDateTime(g.month).slice(0, 7), // YYYY-MM
             id_reserva: r.id,
-            estado: r.status,
+            estado: formatReservationStatus(r.status),
             inicio: fmtDateTime(r.start_at),
             fin: fmtDateTime(r.end_at),
             total: Number(r.total_amount).toFixed(2),
@@ -677,8 +695,8 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
           mileage: r.mileage,
           maintenance_mileage: r.maintenance_mileage,
           km_remaining: r.km_remaining,
-          status: r.status,
-          is_active: r.is_active ? 'Sí' : 'No',
+          status: formatVehicleStatus?.(r.status) ?? formatReservationStatus(r.status),
+          is_active: formatBoolEs(r.is_active),
         }));
 
         drawTableDynamic(doc, 40, doc.y + 6, cols, vehRows, {fontSize, headerFontSize: 11});
