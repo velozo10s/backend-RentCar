@@ -5,13 +5,40 @@ import QRCode from 'qrcode';
 
 dotenv.config();
 
+const STATUS_MAP_ES = {
+  pending: 'Pendiente',
+  confirmed: 'Confirmado',
+  active: 'Activa',
+  completed: 'Finalizada',
+  declined: 'Rechazada',
+  cancelled: 'Cancelada',
+};
+const capitalize = (s = '') => s.charAt(0).toUpperCase() + s.slice(1);
+const formatReservationStatus = (val) => {
+  if (!val) return '—';
+  const key = String(val).toLowerCase().trim();
+  // Si viene con underscores, los hacemos espacio para fallback legible
+  return STATUS_MAP_ES[key] ?? capitalize(key.replace(/_/g, ' '));
+};
+
+
 /** =========================
  * Helpers comunes (XLSX)
  * ========================= */
 
-function addTableSheet(wb, name, columns, rows, {headerFill = 'FFEEEEEE', autoFilter = true} = {}) {
+function addTableSheet(
+  wb,
+  name,
+  columns,
+  rows,
+  {headerFill = 'FFEEEEEE', autoFilter = true} = {}
+) {
   const ws = wb.addWorksheet(name);
-  ws.columns = columns.map(c => ({header: c.header, key: c.key, width: c.width || 20}));
+  ws.columns = columns.map((c) => ({
+    header: c.header,
+    key: c.key,
+    width: c.width || 20,
+  }));
   if (rows?.length) ws.addRows(rows);
 
   // Estilos header
@@ -24,7 +51,7 @@ function addTableSheet(wb, name, columns, rows, {headerFill = 'FFEEEEEE', autoFi
   if (autoFilter) {
     ws.autoFilter = {
       from: {row: 1, column: 1},
-      to: {row: 1, column: columns.length}
+      to: {row: 1, column: columns.length},
     };
   }
 
@@ -42,70 +69,71 @@ function addTableSheet(wb, name, columns, rows, {headerFill = 'FFEEEEEE', autoFi
 }
 
 /** =========================
- * XLSX por tipo de reporte
+ * XLSX por tipo de reporte (en ES)
  * ========================= */
 
 function xlsxReservationStatus(payload) {
   const wb = new ExcelJS.Workbook();
 
-  // 1) Summary by Status
-  const summaryRows = Object.entries(payload.aggregates?.byStatus || {}).map(([status, count]) => ({status, count}));
+  // 1) Resumen por estado
+  const summaryRows = Object.entries(payload.aggregates?.byStatus || {}).map(
+    ([estado, cantidad]) => ({estado, cantidad})
+  );
   addTableSheet(
     wb,
-    'Summary by Status',
+    'Resumen por Estado',
     [
-      {header: 'Status', key: 'status', width: 24},
-      {header: 'Count', key: 'count', width: 12, alignment: {horizontal: 'right'}}
+      {header: 'Estado', key: 'estado', width: 24},
+      {header: 'Cantidad', key: 'cantidad', width: 12, alignment: {horizontal: 'right'}},
     ],
     summaryRows
   );
 
-  // 2) Reservations (una fila por reserva)
-  const reservations = (payload.groups || []).flatMap(g =>
-    (g.reservations || []).map(r => ({
+  // 2) Reservas
+  const reservas = (payload.groups || []).flatMap((g) =>
+    (g.reservations || []).map((r) => ({
       id: r.id,
-      status: r.status,
-      customer_name: r.customer_name,
-      start_at: r.start_at,
-      end_at: r.end_at,
-      total_amount: Number(r.total_amount),
-      note: r.note || '',
-      items_count: Array.isArray(r.items) ? r.items.length : 0
+      estado: r.status,
+      cliente: r.customer_name,
+      inicio: r.start_at,
+      fin: r.end_at,
+      total: Number(r.total_amount),
+      nota: r.note || '',
+      items: Array.isArray(r.items) ? r.items.length : 0,
     }))
   );
   addTableSheet(
     wb,
-    'Reservations',
+    'Reservas',
     [
-      {header: 'Reservation ID', key: 'id', width: 16},
-      {header: 'Status', key: 'status', width: 16},
-      {header: 'Customer', key: 'customer_name', width: 28},
-      {header: 'Start', key: 'start_at', width: 22},
-      {header: 'End', key: 'end_at', width: 22},
-      {header: 'Total', key: 'total_amount', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
-      {header: 'Note', key: 'note', width: 40},
-      {header: 'Items', key: 'items_count', width: 10, alignment: {horizontal: 'right'}}
+      {header: 'ID de Reserva', key: 'id', width: 16},
+      {header: 'Estado', key: 'estado', width: 16},
+      {header: 'Cliente', key: 'cliente', width: 28},
+      {header: 'Inicio', key: 'inicio', width: 22},
+      {header: 'Fin', key: 'fin', width: 22},
+      {header: 'Total', key: 'total', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
+      {header: 'Nota', key: 'nota', width: 40},
+      {header: 'Ítems', key: 'items', width: 10, alignment: {horizontal: 'right'}},
     ],
-    reservations
+    reservas
   );
 
-  // 3) Items (una fila por ítem)
-  const items = (payload.groups || []).flatMap(g =>
-    (g.reservations || []).flatMap(r =>
-      (r.items || []).map(it => ({
-        reservation_id: r.id,
-        vehicle_id: it.vehicle_id,
-        line_amount: Number(it.line_amount)
-      }))
-    )
-  );
+  // 3) Ítems
+  const items = (payload.groups || [])
+    .flatMap((g) => (g.reservations || [])
+      .flatMap((r) => (r.items || []).map((it) => ({
+        id_reserva: r.id,
+        id_vehiculo: it.vehicle_id,
+        importe_linea: Number(it.line_amount),
+      })))
+    );
   addTableSheet(
     wb,
-    'Items',
+    'Ítems',
     [
-      {header: 'Reservation ID', key: 'reservation_id', width: 16},
-      {header: 'Vehicle ID', key: 'vehicle_id', width: 14},
-      {header: 'Line Amount', key: 'line_amount', width: 16, numFmt: '#,##0.00', alignment: {horizontal: 'right'}}
+      {header: 'ID de Reserva', key: 'id_reserva', width: 16},
+      {header: 'ID de Vehículo', key: 'id_vehiculo', width: 14},
+      {header: 'Importe Ítem', key: 'importe_linea', width: 16, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
     ],
     items
   );
@@ -116,44 +144,44 @@ function xlsxReservationStatus(payload) {
 function xlsxMonthlyRevenue(payload) {
   const wb = new ExcelJS.Workbook();
 
-  // 1) Summary (serie mensual)
-  const series = (payload.aggregates?.series || []).map(s => ({
-    month: s.month,
-    revenue: Number(s.revenue)
+  // 1) Resumen (serie mensual)
+  const series = (payload.aggregates?.series || []).map((s) => ({
+    mes: s.month,
+    ingresos: Number(s.revenue),
   }));
   addTableSheet(
     wb,
-    'Monthly Summary',
+    'Resumen Mensual',
     [
-      {header: 'Month', key: 'month', width: 16},
-      {header: 'Revenue', key: 'revenue', width: 16, numFmt: '#,##0.00', alignment: {horizontal: 'right'}}
+      {header: 'Mes', key: 'mes', width: 16},
+      {header: 'Ingresos', key: 'ingresos', width: 16, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
     ],
     series
   );
 
-  // 2) Reservations by Month
-  const rows = (payload.groups || []).flatMap(g =>
-    (g.reservations || []).map(r => ({
-      month: g.month,
-      reservation_id: r.id,
-      customer_user_id: r.customer_user_id,
-      status: r.status,
-      start_at: r.start_at,
-      end_at: r.end_at,
-      total_amount: Number(r.total_amount)
+  // 2) Reservas por Mes
+  const rows = (payload.groups || []).flatMap((g) =>
+    (g.reservations || []).map((r) => ({
+      mes: g.month,
+      id_reserva: r.id,
+      id_cliente: r.customer_user_id,
+      estado: r.status,
+      inicio: r.start_at,
+      fin: r.end_at,
+      total: Number(r.total_amount),
     }))
   );
   addTableSheet(
     wb,
-    'Reservations by Month',
+    'Reservas por Mes',
     [
-      {header: 'Month', key: 'month', width: 16},
-      {header: 'Reservation ID', key: 'reservation_id', width: 16},
-      {header: 'Customer User ID', key: 'customer_user_id', width: 18},
-      {header: 'Status', key: 'status', width: 14},
-      {header: 'Start', key: 'start_at', width: 22},
-      {header: 'End', key: 'end_at', width: 22},
-      {header: 'Total', key: 'total_amount', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}}
+      {header: 'Mes', key: 'mes', width: 16},
+      {header: 'ID de Reserva', key: 'id_reserva', width: 16},
+      {header: 'ID de Cliente', key: 'id_cliente', width: 18},
+      {header: 'Estado', key: 'estado', width: 14},
+      {header: 'Inicio', key: 'inicio', width: 22},
+      {header: 'Fin', key: 'fin', width: 22},
+      {header: 'Total', key: 'total', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
     ],
     rows
   );
@@ -164,38 +192,38 @@ function xlsxMonthlyRevenue(payload) {
 function xlsxUpcomingMaintenance(payload) {
   const wb = new ExcelJS.Workbook();
 
-  // 1) Buckets summary
+  // 1) Resumen de buckets
   const b = payload.aggregates?.buckets || {};
   addTableSheet(
     wb,
-    'Summary',
+    'Resumen',
     [
       {header: 'Bucket', key: 'bucket', width: 24},
-      {header: 'Count', key: 'count', width: 12, alignment: {horizontal: 'right'}}
+      {header: 'Cantidad', key: 'count', width: 12, alignment: {horizontal: 'right'}},
     ],
     [
-      {bucket: 'overdue (<=0km)', count: b.overdue || 0},
-      {bucket: '< 500km', count: b.lt_500 || 0},
-      {bucket: '500–1000km', count: b.gte_500_lt_1000 || 0},
-      {bucket: 'Total', count: payload.aggregates?.total || 0}
+      {bucket: 'vencido (<=0 km)', count: b.overdue || 0},
+      {bucket: '< 500 km', count: b.lt_500 || 0},
+      {bucket: '500–1000 km', count: b.gte_500_lt_1000 || 0},
+      {bucket: 'Total', count: payload.aggregates?.total || 0},
     ]
   );
 
-  // 2) Vehicles table
+  // 2) Vehículos
   addTableSheet(
     wb,
-    'Vehicles',
+    'Vehículos',
     [
-      {header: 'Vehicle ID', key: 'id', width: 12},
-      {header: 'Brand', key: 'brand', width: 18},
-      {header: 'Model', key: 'model', width: 18},
-      {header: 'Year', key: 'year', width: 10, alignment: {horizontal: 'right'}},
-      {header: 'Plate', key: 'license_plate', width: 14},
-      {header: 'Mileage', key: 'mileage', width: 12, alignment: {horizontal: 'right'}},
-      {header: 'Next Service', key: 'maintenance_mileage', width: 14, alignment: {horizontal: 'right'}},
-      {header: 'Km Remaining', key: 'km_remaining', width: 14, alignment: {horizontal: 'right'}},
-      {header: 'Status', key: 'status', width: 16},
-      {header: 'Active', key: 'is_active', width: 10}
+      {header: 'ID Vehículo', key: 'id', width: 12},
+      {header: 'Marca', key: 'brand', width: 18},
+      {header: 'Modelo', key: 'model', width: 18},
+      {header: 'Año', key: 'year', width: 10, alignment: {horizontal: 'right'}},
+      {header: 'Patente', key: 'license_plate', width: 14},
+      {header: 'Km.', key: 'mileage', width: 12, alignment: {horizontal: 'right'}},
+      {header: 'Próx. Servicio', key: 'maintenance_mileage', width: 14, alignment: {horizontal: 'right'}},
+      {header: 'Km Restantes', key: 'km_remaining', width: 14, alignment: {horizontal: 'right'}},
+      {header: 'Estado', key: 'status', width: 16},
+      {header: 'Activo', key: 'is_active', width: 10},
     ],
     payload.items || []
   );
@@ -206,54 +234,54 @@ function xlsxUpcomingMaintenance(payload) {
 function xlsxFrequentCustomers(payload) {
   const wb = new ExcelJS.Workbook();
 
-  // 1) Customers summary
-  const rows = (payload.items || []).map(r => ({
-    user_id: r.user_id,
-    customer_name: r.customer_name,
-    document_number: r.document_number,
-    reservation_count: Number(r.reservation_count)
+  // 1) Clientes
+  const rows = (payload.items || []).map((r) => ({
+    id_usuario: r.user_id,
+    cliente: r.customer_name,
+    documento: r.document_number,
+    reservas: Number(r.reservation_count),
   }));
   addTableSheet(
     wb,
-    'Customers',
+    'Clientes',
     [
-      {header: 'User ID', key: 'user_id', width: 12},
-      {header: 'Customer', key: 'customer_name', width: 28},
-      {header: 'Document', key: 'document_number', width: 16},
-      {header: 'Reservations', key: 'reservation_count', width: 14, alignment: {horizontal: 'right'}}
+      {header: 'ID Usuario', key: 'id_usuario', width: 12},
+      {header: 'Cliente', key: 'cliente', width: 28},
+      {header: 'Documento', key: 'documento', width: 16},
+      {header: 'Reservas', key: 'reservas', width: 14, alignment: {horizontal: 'right'}},
     ],
     rows
   );
 
-  // 2) Reservations detail
-  const reservations = (payload.items || []).flatMap(r =>
-    (r.reservations || []).map(rv => ({
-      user_id: r.user_id,
-      customer_name: r.customer_name,
-      reservation_id: rv.id,
-      start_at: rv.start_at,
-      end_at: rv.end_at,
-      total_amount: Number(rv.total_amount)
+  // 2) Detalle de Reservas
+  const reservas = (payload.items || []).flatMap((r) =>
+    (r.reservations || []).map((rv) => ({
+      id_usuario: r.user_id,
+      cliente: r.customer_name,
+      id_reserva: rv.id,
+      inicio: rv.start_at,
+      fin: rv.end_at,
+      total: Number(rv.total_amount),
     }))
   );
   addTableSheet(
     wb,
-    'Reservations',
+    'Reservas',
     [
-      {header: 'User ID', key: 'user_id', width: 12},
-      {header: 'Customer', key: 'customer_name', width: 28},
-      {header: 'Reservation ID', key: 'reservation_id', width: 16},
-      {header: 'Start', key: 'start_at', width: 22},
-      {header: 'End', key: 'end_at', width: 22},
-      {header: 'Total', key: 'total_amount', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}}
+      {header: 'ID Usuario', key: 'id_usuario', width: 12},
+      {header: 'Cliente', key: 'cliente', width: 28},
+      {header: 'ID de Reserva', key: 'id_reserva', width: 16},
+      {header: 'Inicio', key: 'inicio', width: 22},
+      {header: 'Fin', key: 'fin', width: 22},
+      {header: 'Total', key: 'total', width: 14, numFmt: '#,##0.00', alignment: {horizontal: 'right'}},
     ],
-    reservations
+    reservas
   );
 
   return wb;
 }
 
-/** API principal: ahora recibe nameBase para decidir layout */
+/** API principal XLSX: nameBase decide layout */
 export async function buildXlsxBuffer(payload, nameBase = 'report') {
   let wb;
   switch (nameBase) {
@@ -270,43 +298,44 @@ export async function buildXlsxBuffer(payload, nameBase = 'report') {
       wb = xlsxFrequentCustomers(payload);
       break;
     default: {
-      // Fallback genérico (similar al viejo) por compatibilidad
+      // Fallback genérico en ES
       wb = new ExcelJS.Workbook();
       addTableSheet(
         wb,
-        'aggregates',
+        'Agregados',
         [
-          {header: 'key', key: 'key', width: 30},
-          {header: 'value', key: 'value', width: 60}
+          {header: 'clave', key: 'key', width: 30},
+          {header: 'valor', key: 'value', width: 60},
         ],
         Object.entries(payload.aggregates || {}).map(([k, v]) => ({
           key: k,
-          value: typeof v === 'object' ? JSON.stringify(v) : v
+          value: typeof v === 'object' ? JSON.stringify(v) : v,
         }))
       );
 
       if (payload.groups?.length) {
         addTableSheet(
           wb,
-          'groups',
+          'Grupos',
           [
-            {header: 'group_key', key: 'group_key', width: 24},
-            {header: 'count', key: 'count', width: 10},
-            {header: 'payload', key: 'payload', width: 80}
+            {header: 'grupo', key: 'group_key', width: 24},
+            {header: 'cantidad', key: 'count', width: 10},
+            {header: 'payload', key: 'payload', width: 80},
           ],
-          payload.groups.map(g => ({
+          payload.groups.map((g) => ({
             group_key: g.status || g.month || '',
             count: g.count || '',
-            payload: JSON.stringify(g)
+            payload: JSON.stringify(g),
           }))
         );
       }
 
       if (payload.items?.length) {
         const keys = Object.keys(payload.items[0] || {});
-        const ws = wb.addWorksheet('items');
+        const ws = wb.addWorksheet('Ítems');
         ws.addRow(keys);
-        for (const it of payload.items) ws.addRow(keys.map(k => typeof it[k] === 'object' ? JSON.stringify(it[k]) : it[k]));
+        for (const it of payload.items)
+          ws.addRow(keys.map((k) => (typeof it[k] === 'object' ? JSON.stringify(it[k]) : it[k])));
       }
     }
   }
@@ -316,42 +345,60 @@ export async function buildXlsxBuffer(payload, nameBase = 'report') {
 }
 
 /** =========================
- * PDF helpers (tabla simple)
+ * PDF helpers (tabla simple) — EN ESPAÑOL + mejor ajuste ancho
  * ========================= */
 
-function normalizeColumnsToWidth(doc, columns, availableWidth, {minColWidth = 60} = {}) {
-  // Si el total supera el ancho disponible, escalar.
+/**
+ * Ajusta el ancho total de columnas para caber en availableWidth:
+ * 1) Escala proporcionalmente.
+ * 2) Aplica mínimos.
+ * 3) Si aún no entra, re-escala por debajo del mínimo como último recurso.
+ */
+function normalizeColumnsToWidth(
+  doc,
+  columns,
+  availableWidth,
+  {minColWidth = 50} = {}
+) {
   const total = columns.reduce((a, c) => a + c.width, 0);
-  if (total <= availableWidth) return columns;
+  if (total <= availableWidth) return columns.map((c) => ({...c}));
 
+  // 1) Escala proporcional inicial
   const scale = availableWidth / total;
-  let scaled = columns.map(c => ({...c, width: Math.max(Math.floor(c.width * scale), minColWidth)}));
+  let scaled = columns.map((c) => ({
+    ...c,
+    width: Math.max(Math.floor(c.width * scale), minColWidth),
+  }));
 
-  // Si todavía nos pasamos (porque aplicamos mínimos), hacer un segundo ajuste proporcional.
+  // 2) Si aún excede por mínimos, intentar reducción proporcional ignorando mínimos (fallback duro)
   let sum = scaled.reduce((a, c) => a + c.width, 0);
   if (sum > availableWidth) {
-    const extra = sum - availableWidth;
-    // Reducir distribuido (de derecha a izquierda) respetando minColWidth
-    for (let i = scaled.length - 1; i >= 0 && sum > availableWidth; i--) {
-      const canReduce = scaled[i].width - minColWidth;
-      if (canReduce <= 0) continue;
-      const take = Math.min(canReduce, extra);
-      scaled[i].width -= take;
-      sum -= take;
-    }
+    const scale2 = availableWidth / sum;
+    scaled = scaled.map((c) => ({
+      ...c,
+      width: Math.max(Math.floor(c.width * scale2), 30), // nunca menos de 30 para que el texto quepa con elipsis
+    }));
   }
+
   return scaled;
 }
 
-function drawTableDynamic(doc, startX, startY, columns, rows, {
-  headerFill = '#eeeeee',
-  padding = 4,
-  zebra = true,
-  baseRowHeight = 18,
-  fontSize = 9,
-  headerFontSize = 10,
-  maxY = 770
-} = {}) {
+function drawTableDynamic(
+  doc,
+  startX,
+  startY,
+  columns,
+  rows,
+  {
+    headerFill = '#eeeeee',
+    padding = 4,
+    zebra = true,
+    baseRowHeight = 18,
+    fontSize = 9,
+    headerFontSize = 10,
+    maxY = 770,
+  } = {}
+) {
   // Ajustar columnas al ancho útil
   const pageWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
   const availableWidth = pageWidth - (startX - doc.page.margins.left);
@@ -392,13 +439,13 @@ function drawTableDynamic(doc, startX, startY, columns, rows, {
   for (let idx = 0; idx < rows.length; idx++) {
     const r = rows[idx];
 
-    // Calcular alto real de la fila: máximo alto entre columnas según width
+    // Alto real de la fila: máximo alto entre columnas (wrapping)
     let rowHeight = baseRowHeight;
     for (const col of cols) {
       const val = r[col.key] != null ? String(r[col.key]) : '';
       const h = doc.heightOfString(val, {
         width: col.width - padding * 2,
-        align: 'left'
+        align: 'left',
       });
       rowHeight = Math.max(rowHeight, h + padding * 2);
     }
@@ -409,7 +456,10 @@ function drawTableDynamic(doc, startX, startY, columns, rows, {
 
     if (zebra && idx % 2 === 0) {
       doc.save();
-      doc.rect(startX, y, cols.reduce((a, c) => a + c.width, 0), rowHeight).fill('#f9f9f9').restore();
+      doc
+        .rect(startX, y, cols.reduce((a, c) => a + c.width, 0), rowHeight)
+        .fill('#f9f9f9')
+        .restore();
     }
 
     let cx = startX;
@@ -425,9 +475,17 @@ function drawTableDynamic(doc, startX, startY, columns, rows, {
   return y;
 }
 
-/** API principal PDF: usa nameBase (title) para decidir layout de tabla */
+/** API principal PDF: ahora en español */
 export async function buildSimplePdfBuffer(payload, title = 'report', options = {}) {
-  const orientation = options.orientation === 'landscape' ? 'landscape' : 'portrait';
+  // Para mantenimiento, si no especifican orientación, usar landscape por defecto (muchas columnas)
+  const inferLandscape =
+    title === 'upcoming_maintenance' && !options.orientation;
+
+  const orientation =
+    (options.orientation || (inferLandscape ? 'landscape' : 'portrait')).toLowerCase() === 'landscape'
+      ? 'landscape'
+      : 'portrait';
+
   const fontSize = options.fontSize || 9;
   const compact = !!options.compact;
 
@@ -442,220 +500,254 @@ export async function buildSimplePdfBuffer(payload, title = 'report', options = 
     const fmtDateTime = (v) => {
       const d = new Date(v);
       if (Number.isNaN(+d)) return String(v ?? '');
-      return d.toISOString().replace('T', ' ').slice(0, 16);
+      // Mostrar local-friendly
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const hh = String(d.getHours()).padStart(2, '0');
+      const mi = String(d.getMinutes()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
     };
 
     switch (title) {
       case 'reservation_status': {
-        doc.fontSize(16).text('Reservation Status', {underline: true});
+        doc.fontSize(16).text('Estados de Reserva', {underline: true});
         doc.moveDown(0.6);
 
-        // Summary
-        const summary = Object.entries(payload.aggregates?.byStatus || {}).map(([status, count]) => ({status, count}));
-        drawTableDynamic(doc, 40, doc.y + 6,
+        // Resumen
+        const summary = Object.entries(payload.aggregates?.byStatus || {}).map(
+          ([estado, cantidad]) => ({estado, cantidad})
+        );
+        drawTableDynamic(
+          doc,
+          40,
+          doc.y + 6,
           [
-            {header: 'Status', key: 'status', width: 220},
-            {header: 'Count', key: 'count', width: 100}
+            {header: 'Estado', key: 'estado', width: 220},
+            {header: 'Cantidad', key: 'cantidad', width: 100},
           ],
           summary,
           {fontSize, headerFontSize: 11}
         );
         doc.moveDown(0.6);
 
-        // Reservations (modo compacto reduce columnas largas)
-        const reservations = (payload.groups || []).flatMap(g =>
-          (g.reservations || []).map(r => ({
+        // Reservas
+        const reservas = (payload.groups || []).flatMap((g) =>
+          (g.reservations || []).map((r) => ({
             id: r.id,
-            status: r.status,
-            customer: r.customer_name,
-            start: fmtDateTime(r.start_at),
-            end: fmtDateTime(r.end_at),
+            estado: r.status,
+            cliente: r.customer_name,
+            inicio: fmtDateTime(r.start_at),
+            fin: fmtDateTime(r.end_at),
             total: Number(r.total_amount).toFixed(2),
-            items: Array.isArray(r.items) ? r.items.length : 0
+            items: Array.isArray(r.items) ? r.items.length : 0,
           }))
         );
 
         const columns = compact
           ? [
             {header: 'ID', key: 'id', width: 60},
-            {header: 'Status', key: 'status', width: 90},
-            {header: 'Start', key: 'start', width: 120},
-            {header: 'End', key: 'end', width: 120},
+            {header: 'Estado', key: 'estado', width: 90},
+            {header: 'Inicio', key: 'inicio', width: 120},
+            {header: 'Fin', key: 'fin', width: 120},
             {header: 'Total', key: 'total', width: 80},
-            {header: 'Items', key: 'items', width: 60},
+            {header: 'Ítems', key: 'items', width: 60},
           ]
           : [
             {header: 'ID', key: 'id', width: 60},
-            {header: 'Status', key: 'status', width: 90},
-            {header: 'Customer', key: 'customer', width: 180},
-            {header: 'Start', key: 'start', width: 130},
-            {header: 'End', key: 'end', width: 130},
+            {header: 'Estado', key: 'estado', width: 90},
+            {header: 'Cliente', key: 'cliente', width: 180},
+            {header: 'Inicio', key: 'inicio', width: 130},
+            {header: 'Fin', key: 'fin', width: 130},
             {header: 'Total', key: 'total', width: 80},
-            {header: 'Items', key: 'items', width: 60},
+            {header: 'Ítems', key: 'items', width: 60},
           ];
 
-        doc.fontSize(12).text('Reservations');
-        drawTableDynamic(doc, 40, doc.y + 6, columns, reservations, {fontSize, headerFontSize: 11});
+        doc.fontSize(12).text('Reservas');
+        drawTableDynamic(doc, 40, doc.y + 6, columns, reservas, {fontSize, headerFontSize: 11});
         break;
       }
 
       case 'monthly_revenue': {
-        doc.fontSize(16).text('Monthly Revenue', {underline: true});
+        doc.fontSize(16).text('Ingresos Mensuales', {underline: true});
         doc.moveDown(0.6);
 
-        const series = (payload.aggregates?.series || []).map(s => ({
-          month: s.month,
-          revenue: Number(s.revenue).toFixed(2)
+        const series = (payload.aggregates?.series || []).map((s) => ({
+          mes: s.month,
+          ingresos: Number(s.revenue).toFixed(2),
         }));
 
-        drawTableDynamic(doc, 40, doc.y + 6,
+        drawTableDynamic(
+          doc,
+          40,
+          doc.y + 6,
           [
-            {header: 'Month', key: 'month', width: 180},
-            {header: 'Revenue', key: 'revenue', width: 120}
+            {header: 'Mes', key: 'mes', width: 180},
+            {header: 'Ingresos', key: 'ingresos', width: 120},
           ],
           series,
           {fontSize, headerFontSize: 11}
         );
         doc.moveDown(0.6);
 
-        // Reservations by month
-        const rows = (payload.groups || []).flatMap(g =>
-          (g.reservations || []).map(r => ({
-            month: fmtDateTime(g.month).slice(0, 7), // YYYY-MM
-            reservation_id: r.id,
-            status: r.status,
-            start: fmtDateTime(r.start_at),
-            end: fmtDateTime(r.end_at),
-            total: Number(r.total_amount).toFixed(2)
+        // Reservas por mes
+        const rows = (payload.groups || []).flatMap((g) =>
+          (g.reservations || []).map((r) => ({
+            mes: fmtDateTime(g.month).slice(0, 7), // YYYY-MM
+            id_reserva: r.id,
+            estado: r.status,
+            inicio: fmtDateTime(r.start_at),
+            fin: fmtDateTime(r.end_at),
+            total: Number(r.total_amount).toFixed(2),
           }))
         );
 
         const columns = compact
           ? [
-            {header: 'Month', key: 'month', width: 90},
-            {header: 'Res ID', key: 'reservation_id', width: 70},
-            {header: 'Status', key: 'status', width: 80},
-            {header: 'Total', key: 'total', width: 80}
+            {header: 'Mes', key: 'mes', width: 90},
+            {header: 'ID Reserva', key: 'id_reserva', width: 80},
+            {header: 'Estado', key: 'estado', width: 80},
+            {header: 'Total', key: 'total', width: 80},
           ]
           : [
-            {header: 'Month', key: 'month', width: 110},
-            {header: 'Reservation', key: 'reservation_id', width: 90},
-            {header: 'Status', key: 'status', width: 90},
-            {header: 'Start', key: 'start', width: 130},
-            {header: 'End', key: 'end', width: 130},
-            {header: 'Total', key: 'total', width: 90}
+            {header: 'Mes', key: 'mes', width: 110},
+            {header: 'ID Reserva', key: 'id_reserva', width: 100},
+            {header: 'Estado', key: 'estado', width: 90},
+            {header: 'Inicio', key: 'inicio', width: 130},
+            {header: 'Fin', key: 'fin', width: 130},
+            {header: 'Total', key: 'total', width: 90},
           ];
 
-        doc.fontSize(12).text('Reservations by Month');
+        doc.fontSize(12).text('Reservas por Mes');
         drawTableDynamic(doc, 40, doc.y + 6, columns, rows, {fontSize, headerFontSize: 11});
         break;
       }
 
       case 'upcoming_maintenance': {
-        doc.fontSize(16).text('Upcoming Maintenance', {underline: true});
+        doc.fontSize(16).text('Mantenimiento Próximo', {underline: true});
         doc.moveDown(0.6);
 
         const b = payload.aggregates?.buckets || {};
         const summary = [
-          {bucket: 'overdue (<=0km)', count: b.overdue || 0},
-          {bucket: '< 500km', count: b.lt_500 || 0},
-          {bucket: '500–1000km', count: b.gte_500_lt_1000 || 0},
-          {bucket: 'Total', count: payload.aggregates?.total || 0}
+          {bucket: 'vencido (<=0 km)', cantidad: b.overdue || 0},
+          {bucket: '< 500 km', cantidad: b.lt_500 || 0},
+          {bucket: '500–1000 km', cantidad: b.gte_500_lt_1000 || 0},
+          {bucket: 'Total', cantidad: payload.aggregates?.total || 0},
         ];
-        drawTableDynamic(doc, 40, doc.y + 6,
+        drawTableDynamic(
+          doc,
+          40,
+          doc.y + 6,
           [
             {header: 'Bucket', key: 'bucket', width: 220},
-            {header: 'Count', key: 'count', width: 100}
+            {header: 'Cantidad', key: 'cantidad', width: 100},
           ],
           summary,
           {fontSize, headerFontSize: 11}
         );
         doc.moveDown(0.6);
 
+        // Tabla de vehículos — en ES y con normalización de ancho mejorada
         const cols = compact
           ? [
             {header: 'ID', key: 'id', width: 50},
-            {header: 'Brand', key: 'brand', width: 90},
-            {header: 'Model', key: 'model', width: 100},
-            {header: 'Km Rem.', key: 'km_remaining', width: 70}
+            {header: 'Marca', key: 'brand', width: 90},
+            {header: 'Modelo', key: 'model', width: 110},
+            {header: 'Km Rest.', key: 'km_remaining', width: 70},
           ]
           : [
-            {header: 'ID', key: 'id', width: 50},
-            {header: 'Brand', key: 'brand', width: 90},
-            {header: 'Model', key: 'model', width: 100},
-            {header: 'Year', key: 'year', width: 50},
-            {header: 'Plate', key: 'license_plate', width: 80},
-            {header: 'Mileage', key: 'mileage', width: 70},
-            {header: 'Next', key: 'maintenance_mileage', width: 70},
-            {header: 'Km Rem.', key: 'km_remaining', width: 70},
-            {header: 'Status', key: 'status', width: 80},
-            {header: 'Active', key: 'is_active', width: 50}
+            {header: 'ID', key: 'id', width: 55},
+            {header: 'Marca', key: 'brand', width: 90},
+            {header: 'Modelo', key: 'model', width: 110},
+            {header: 'Año', key: 'year', width: 50},
+            {header: 'Patente', key: 'license_plate', width: 80},
+            {header: 'Kilometraje', key: 'mileage', width: 80},
+            {header: 'Próx. Serv.', key: 'maintenance_mileage', width: 85},
+            {header: 'Km Rest.', key: 'km_remaining', width: 80},
+            {header: 'Estado', key: 'status', width: 80},
+            {header: 'Activo', key: 'is_active', width: 60},
           ];
 
-        drawTableDynamic(doc, 40, doc.y + 6, cols, payload.items || [], {fontSize, headerFontSize: 11});
+        const vehRows = (payload.items || []).map((r) => ({
+          id: r.id,
+          brand: r.brand,
+          model: r.model,
+          year: r.year,
+          license_plate: r.license_plate,
+          mileage: r.mileage,
+          maintenance_mileage: r.maintenance_mileage,
+          km_remaining: r.km_remaining,
+          status: r.status,
+          is_active: r.is_active ? 'Sí' : 'No',
+        }));
+
+        drawTableDynamic(doc, 40, doc.y + 6, cols, vehRows, {fontSize, headerFontSize: 11});
         break;
       }
 
       case 'frequent_customers': {
-        doc.fontSize(16).text('Frequent Customers', {underline: true});
+        doc.fontSize(16).text('Clientes Frecuentes', {underline: true});
         doc.moveDown(0.6);
 
-        const customers = (payload.items || []).map(r => ({
-          user_id: r.user_id,
-          customer_name: r.customer_name,
-          document_number: r.document_number,
-          reservation_count: Number(r.reservation_count)
+        const clientes = (payload.items || []).map((r) => ({
+          id_usuario: r.user_id,
+          cliente: r.customer_name,
+          documento: r.document_number,
+          reservas: Number(r.reservation_count),
         }));
 
         const cols = compact
           ? [
-            {header: 'User', key: 'user_id', width: 60},
-            {header: 'Customer', key: 'customer_name', width: 180},
-            {header: 'Res', key: 'reservation_count', width: 60}
+            {header: 'Usuario', key: 'id_usuario', width: 60},
+            {header: 'Cliente', key: 'cliente', width: 200},
+            {header: 'Reservas', key: 'reservas', width: 70},
           ]
           : [
-            {header: 'User ID', key: 'user_id', width: 70},
-            {header: 'Customer', key: 'customer_name', width: 200},
-            {header: 'Document', key: 'document_number', width: 120},
-            {header: 'Reservations', key: 'reservation_count', width: 100}
+            {header: 'ID Usuario', key: 'id_usuario', width: 80},
+            {header: 'Cliente', key: 'cliente', width: 220},
+            {header: 'Documento', key: 'documento', width: 130},
+            {header: 'Reservas', key: 'reservas', width: 90},
           ];
 
-        drawTableDynamic(doc, 40, doc.y + 6, cols, customers, {fontSize, headerFontSize: 11});
+        drawTableDynamic(doc, 40, doc.y + 6, cols, clientes, {fontSize, headerFontSize: 11});
         doc.addPage();
 
-        doc.fontSize(12).text('Reservations');
-        const reservations = (payload.items || []).flatMap(r =>
-          (r.reservations || []).map(rv => ({
-            user_id: r.user_id,
-            reservation_id: rv.id,
-            start: fmtDateTime(rv.start_at),
-            end: fmtDateTime(rv.end_at),
-            total: Number(rv.total_amount).toFixed(2)
+        doc.fontSize(12).text('Reservas');
+        const reservas = (payload.items || []).flatMap((r) =>
+          (r.reservations || []).map((rv) => ({
+            id_usuario: r.user_id,
+            id_reserva: rv.id,
+            inicio: fmtDateTime(rv.start_at),
+            fin: fmtDateTime(rv.end_at),
+            total: Number(rv.total_amount).toFixed(2),
           }))
         );
 
         const cols2 = compact
           ? [
-            {header: 'User', key: 'user_id', width: 60},
-            {header: 'Res ID', key: 'reservation_id', width: 70},
-            {header: 'Total', key: 'total', width: 70}
+            {header: 'Usuario', key: 'id_usuario', width: 60},
+            {header: 'ID Reserva', key: 'id_reserva', width: 80},
+            {header: 'Total', key: 'total', width: 80},
           ]
           : [
-            {header: 'User ID', key: 'user_id', width: 70},
-            {header: 'Reservation ID', key: 'reservation_id', width: 110},
-            {header: 'Start', key: 'start', width: 140},
-            {header: 'End', key: 'end', width: 140},
-            {header: 'Total', key: 'total', width: 90}
+            {header: 'ID Usuario', key: 'id_usuario', width: 80},
+            {header: 'ID Reserva', key: 'id_reserva', width: 110},
+            {header: 'Inicio', key: 'inicio', width: 140},
+            {header: 'Fin', key: 'fin', width: 140},
+            {header: 'Total', key: 'total', width: 90},
           ];
 
-        drawTableDynamic(doc, 40, doc.y + 6, cols2, reservations, {fontSize, headerFontSize: 11});
+        drawTableDynamic(doc, 40, doc.y + 6, cols2, reservas, {fontSize, headerFontSize: 11});
         break;
       }
 
       default: {
-        doc.fontSize(16).text(title, {underline: true});
+        doc.fontSize(16).text('Reporte', {underline: true});
         doc.moveDown(0.5);
-        drawTableDynamic(doc, 40, doc.y + 6,
+        drawTableDynamic(
+          doc,
+          40,
+          doc.y + 6,
           [{header: 'JSON', key: 'json', width: 500}],
           [{json: JSON.stringify(payload).slice(0, 4000) + '…'}],
           {fontSize}
@@ -923,22 +1015,6 @@ export async function buildContractPdfBuffer(data) {
     if (COMPANY_WEBSITE) doc.text(COMPANY_WEBSITE);
     doc.moveDown();
     hr();
-
-    const STATUS_MAP_ES = {
-      pending: 'Pendiente',
-      confirmed: 'Confirmado',
-      active: 'Activa',
-      completed: 'Finalizada',
-      declined: 'Rechazada',
-      cancelled: 'Cancelada',
-    };
-    const capitalize = (s = '') => s.charAt(0).toUpperCase() + s.slice(1);
-    const formatReservationStatus = (val) => {
-      if (!val) return '—';
-      const key = String(val).toLowerCase().trim();
-      // Si viene con underscores, los hacemos espacio para fallback legible
-      return STATUS_MAP_ES[key] ?? capitalize(key.replace(/_/g, ' '));
-    };
 
     // ---- Cards (ahora visibles) ----
     renderInfoCard('Datos de la Reserva', [
